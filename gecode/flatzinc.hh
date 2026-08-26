@@ -99,6 +99,7 @@
  */
 
 namespace Gecode { namespace FlatZinc {
+  class IncumbentSolution;
 
   /**
    * \brief Output support class for %FlatZinc interpreter
@@ -249,6 +250,11 @@ namespace Gecode { namespace FlatZinc {
       Gecode::Driver::DoubleOption      _step;        ///< Step option
       //@}
 
+      // MAB options
+      Gecode::Driver::BoolOption        _portfolio; //< Whether to use portfolio or default BAB
+      Gecode::Driver::BoolOption        _no_mab; //< Whether to use round-robbin or multi-armed bandit
+      Gecode::Driver::IntOption         _assets; //< How many assets to use for portfolio
+
       /// \name Execution options
       //@{
       Gecode::Driver::StringOption      _mode;       ///< Script mode to run
@@ -287,6 +293,10 @@ namespace Gecode { namespace FlatZinc {
       _interrupt("interrupt","whether to catch Ctrl-C (true) or not (false)",
                  true),
       _step("step","step distance for float optimization",0.0),
+      _portfolio("portfolio", "whether to use portfolio-based-search or not", false), // ADDED
+      _assets("assets","the number of assets to use with portfolio-based search", 8), // ADDED
+      _no_mab("no-mab", "use static assets instead of MAB", false), // ADDED
+
       _mode("mode","how to execute script",Gecode::SM_SOLUTION),
       _stat("s","emit statistics"),
       _output("o","file to send output to")
@@ -312,6 +322,11 @@ namespace Gecode { namespace FlatZinc {
       add(_node); add(_fail); add(_time); add(_time_limit); add(_interrupt);
       add(_seed);
       add(_step);
+
+      add(_portfolio);
+      add(_assets);
+      add(_no_mab);
+
       add(_restart); add(_r_base); add(_r_scale); add(_r_limit);
       add(_nogoods); add(_nogoods_limit);
       add(_mode); add(_stat);
@@ -352,6 +367,11 @@ namespace Gecode { namespace FlatZinc {
     int seed(void) const { return _seed.value(); }
     double step(void) const { return _step.value(); }
     const char* output(void) const { return _output.value(); }
+
+    bool stat(void) const { return _stat.value(); }
+    bool portfolio(void) const { return _portfolio.value(); }
+    int assets(void) const { return _assets.value(); }
+    bool mab(void) const { return !_no_mab.value(); }
 
     Gecode::ScriptMode mode(void) const {
       return static_cast<Gecode::ScriptMode>(_mode.value());
@@ -416,6 +436,7 @@ namespace Gecode { namespace FlatZinc {
 
   class FlatZincSpaceInitData;
   class BlackBoxAccess;
+  class LnsHeuristic;
 
   /**
    * \brief A space that can be initialized with a %FlatZinc model
@@ -459,6 +480,7 @@ namespace Gecode { namespace FlatZinc {
 
     /// Annotations on the solve item
     AST::Array* _solveAnnotations;
+    std::vector<std::shared_ptr<LnsHeuristic>> _lnsHeuristics;
 
     /// Copy constructor
     FlatZincSpace(FlatZincSpace&);
@@ -485,6 +507,12 @@ namespace Gecode { namespace FlatZinc {
 
     /// The integer variables used in LNS
     Gecode::IntVarArray iv_lns;
+    /// The Boolean variables used in LNS
+    Gecode::BoolVarArray bv_lns;
+    /// The float variables used in LNS
+    Gecode::FloatVarArray fv_lns;
+    /// The set variables used in LNS
+    Gecode::SetVarArray sv_lns;
 
     /* === Experimental `on_restart` support === */
     class OnRestartHandle : public SharedHandle {
@@ -579,6 +607,8 @@ namespace Gecode { namespace FlatZinc {
     /// Step by which a next solution has to have lower cost
     Gecode::FloatNum step;
 #endif
+    // The current best solution, used in constrain between all assets in pbs. ADDED
+    std::shared_ptr<IncumbentSolution> _incumbentSolution;
     /// Whether the introduced variables still need to be copied
     bool needAuxVars;
     /// Construct empty space
@@ -590,14 +620,26 @@ namespace Gecode { namespace FlatZinc {
     /// Initialize space with given number of variables
     void init(int intVars, int boolVars, int setVars, int floatVars);
 
+    FlatZincSpace *deepClone() const;
+
     /// Create new integer variable from specification
     void newIntVar(IntVarSpec* vs);
+
+    bool intIsIntroduced(int iv) const ;
+
+    bool intIsFuncDep(int iv) const;
+
     /// Link integer variable \a iv to Boolean variable \a bv
     void aliasBool2Int(int iv, int bv);
     /// Return linked Boolean variable for integer variable \a iv
     int aliasBool2Int(int iv);
     /// Create new Boolean variable from specification
     void newBoolVar(BoolVarSpec* vs);
+
+    bool boolIsIntroduced(int iv) const;
+
+    bool boolIsFuncDep(int iv) const;
+
     /// Create new set variable from specification
     void newSetVar(SetVarSpec* vs);
     /// Create new float variable from specification
@@ -605,6 +647,11 @@ namespace Gecode { namespace FlatZinc {
 
     /// Post a constraint specified by \a ce
     void postConstraints(std::vector<ConExpr*>& ces);
+
+    /// populate the source variables
+    void populateLnsVariables();
+
+    unsigned int numLnsHeuristics() const;
 
     /// Post the solve item
     void solve(AST::Array* annotation);
@@ -616,6 +663,8 @@ namespace Gecode { namespace FlatZinc {
     /// Run the search
     void run(std::ostream& out, const Printer& p,
              const FlatZincOptions& opt, Gecode::Support::Timer& t_total);
+
+    void runPortfolio(std::ostream &out, Printer &p, FlatZincOptions &opt, Support::Timer &t_total);
 
     /// Produce output on \a out using \a p
     void print(std::ostream& out, const Printer& p) const;
@@ -630,6 +679,8 @@ namespace Gecode { namespace FlatZinc {
     /// \a out using \a p
     void compare(const FlatZincSpace& s, std::ostream& out,
                  const Printer& p) const;
+
+    int compareObj(const FlatZincSpace &other) const;
 
     /**
      * \brief Remove all variables not needed for output
@@ -648,6 +699,10 @@ namespace Gecode { namespace FlatZinc {
     int optVar(void) const;
     /// Return whether variable used for optimization is integer (or float)
     bool optVarIsInt(void) const;
+    /// Percentage of variables to keep in LNS (or 0 for no LNS)
+    unsigned int freezePercent(void) const;
+    /// Returns a random integer from the interval \f$[0\ldots n)\f$
+    int random(int n);
 
     /**
      * \brief Create branchers corresponding to the solve item annotations
@@ -665,6 +720,10 @@ namespace Gecode { namespace FlatZinc {
     /// Return the solve item annotations
     AST::Array* solveAnnotations(void) const;
 
+    void applyInitialIncumbentSolution(AST::Array * array);
+
+    static bool hasInitialIncumbentSolution(AST::Array * array);
+
     /// Information for printing branches
     BranchInformation branchInfo;
 
@@ -679,6 +738,9 @@ namespace Gecode { namespace FlatZinc {
     //@{
     /// Convert \a arg (array of integers) to IntArgs
     IntArgs arg2intargs(AST::Node* arg, int offset = 0);
+
+    std::vector<int> arg2intvector(AST::Node *arg, int offset = 0) const;
+
     /// Convert \a arg (array of integers) to IntSharedArray
     IntSharedArray arg2intsharedarray(AST::Node* arg, int offset = 0);
     /// Convert \a arg (array of Booleans) to IntArgs
@@ -691,6 +753,11 @@ namespace Gecode { namespace FlatZinc {
     IntSetArgs arg2intsetargs(AST::Node* arg, int offset = 0);
     /// Convert \a arg to IntVarArgs
     IntVarArgs arg2intvarargs(AST::Node* arg, int offset = 0);
+
+    std::vector<int> arg2intindices(AST::Node *arg, int offset = 0) const;
+
+    bool sourcevars(AST::Node *arg) const;
+
     /// Convert \a arg to BoolVarArgs
     BoolVarArgs arg2boolvarargs(AST::Node* arg, int offset = 0, int siv=-1);
     /// Convert \a n to BoolVar
@@ -721,6 +788,13 @@ namespace Gecode { namespace FlatZinc {
     /// Share DFA \a a if possible
     DFA getSharedDFA(DFA& a);
     //@}
+  };
+
+  class GECODE_FLATZINC_EXPORT LnsHeuristic {
+  public:
+    virtual ~LnsHeuristic() = default;
+    virtual void heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next) = 0;
+    [[nodiscard]] virtual bool applicable(const FlatZincSpace& incumbent) const = 0;
   };
 
   /// %Exception class for %FlatZinc errors

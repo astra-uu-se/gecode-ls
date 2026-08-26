@@ -60,7 +60,7 @@ namespace Gecode { namespace Search { namespace Par {
     /// Signal whether search must be stopped
     void stop(bool s);
     /// Whether search must be stopped
-    bool stop(void) const;
+    bool done(void) const override;
   };
 
   // Forward declaration

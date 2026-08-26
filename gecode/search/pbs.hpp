@@ -66,7 +66,7 @@ namespace Gecode { namespace Search { namespace Seq {
 
   /// Create stop object
   GECODE_SEARCH_EXPORT Stop*
-  pbsstop(Stop* so);
+  portfoliostop(Stop* so);
 
   /// Create sequential portfolio engine
   GECODE_SEARCH_EXPORT Engine*
@@ -108,7 +108,7 @@ namespace Gecode { namespace Search {
                               SearchTracer::EngineType::PBS, n_slaves);
 
     for (unsigned int i=0U; i<n_slaves; i++) {
-      opt.stop = stops[i] = Seq::pbsstop(stop);
+      opt.stop = stops[i] = Seq::portfoliostop(stop);
       Space* slave = (i == n_slaves-1) ?
         master : master->clone();
       (void) slave->slave(i);
@@ -134,7 +134,7 @@ namespace Gecode { namespace Search {
 
     for (int i=0; i<n_slaves; i++) {
       // Re-configure slave options
-      stops[i] = Seq::pbsstop(sebs[i]->options().stop);
+      stops[i] = Seq::portfoliostop(sebs[i]->options().stop);
       sebs[i]->options().stop  = stops[i];
       sebs[i]->options().clone = false;
       Space* slave = (i == n_slaves-1) ?

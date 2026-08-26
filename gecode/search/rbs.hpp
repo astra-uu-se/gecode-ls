@@ -42,6 +42,10 @@ namespace Gecode { namespace Search { namespace Seq {
   GECODE_SEARCH_EXPORT Stop*
   rbsstop(Stop* so);
 
+  /// Create stop object
+  GECODE_SEARCH_EXPORT Stop*
+  rbsstop(Stop* so, const std::shared_ptr<std::atomic<bool>>& optimum_found);
+
   /// Create restart engine
   GECODE_SEARCH_EXPORT Engine*
   rbsengine(Space* master, Stop* stop, Engine* slave,
@@ -98,6 +102,32 @@ namespace Gecode {
       Space* master = m_opt.clone ? s->clone() : s;
       Space* slave  = master->clone();
       MetaInfo mi(0,MetaInfo::RR_INIT,0,0,nullptr,NoGoods::eng);
+      slave->slave(mi);
+      e = Search::Seq::rbsengine(master,e_opt.stop,
+                                 Search::build<T,E>(slave,e_opt),
+                                 stat,m_opt,E<T>::best);
+    }
+  }
+
+  template<class T, template<class> class E>
+  inline
+  RBS<T,E>::RBS(T* s, const Search::Options& m_opt, const std::shared_ptr<std::atomic<bool>>& optimum_found, const std::shared_ptr<std::vector<std::shared_ptr<Space>>>& all_best_solutions) {
+    if (m_opt.cutoff == nullptr)
+      throw Search::UninitializedCutoff("RBS::RBS");
+    Search::Options e_opt(m_opt.expand());
+    Search::Statistics stat;
+    e_opt.clone = false;
+    e_opt.stop = Search::Seq::rbsstop(m_opt.stop, optimum_found);
+    Search::WrapTraceRecorder::engine(e_opt.tracer, SearchTracer::EngineType::RBS, 1U);
+    if (s->status(stat) == SS_FAILED) {
+      stat.fail++;
+      if (!m_opt.clone)
+        delete s;
+      e = Search::Seq::dead(e_opt, stat);
+    } else {
+      Space* master = m_opt.clone ? s->clone() : s;
+      Space* slave  = master->clone();
+      MetaInfo mi(0,MetaInfo::RR_INIT,0,0,nullptr,NoGoods::eng, all_best_solutions);
       slave->slave(mi);
       e = Search::Seq::rbsengine(master,e_opt.stop,
                                  Search::build<T,E>(slave,e_opt),

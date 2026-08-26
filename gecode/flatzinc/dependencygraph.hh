@@ -1,10 +1,10 @@
 /* -*- mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*- */
 /*
  *  Main authors:
- *     Christian Schulte <schulte@gecode.dev>
+ *     Guido Tack <tack@gecode.dev>
  *
  *  Copyright:
- *     Christian Schulte, 2015
+ *     Guido Tack, 2007
  *
  *  This file is part of Gecode, the generic constraint
  *  development environment:
@@ -31,28 +31,50 @@
  *
  */
 
-#include <gecode/search/seq/rbs.hh>
+#ifndef GECODE_FLATZINC_DEPENDENCYGRAPH_HH
+#define GECODE_FLATZINC_DEPENDENCYGRAPH_HH
 
-namespace Gecode { namespace Search { namespace Seq {
+#include <gecode/flatzinc.hh>
+#include <string>
+#include <map>
+#include <set>
 
-  Stop*
-  rbsstop(Stop* stop) {
-    return new RestartStop(stop);
-  }
+namespace Gecode { namespace FlatZinc {
 
-  Stop*
-  rbsstop(Stop* stop, const std::shared_ptr<std::atomic<bool>> &optimum_found) {
-    return new RestartStop(stop, optimum_found);
-  }
+  enum NEIGHBORHOOD_CONSTRAINT : int {
+    NEIGHBORHOOD_NONE = 0,
+    NEIGHBORHOOD_CIRCUIT = 10000,
+    NEIGHBORHOOD_DISJUNCTIVE = 20000
+  };
 
-  Engine*
-  rbsengine(Space* master, Stop* stop, Engine* slave,
-            const Search::Statistics& stat, const Options& opt, bool best) {
-    return new RBS(master,static_cast<RestartStop*>(stop), slave,
-                   stat,opt,best);
-  }
+  /// Map from constraint identifier to constraint posting functions
+  class GECODE_FLATZINC_EXPORT DependencyGraph {
+  public:
+    DependencyGraph();
 
+    ~DependencyGraph() = default;
 
-}}}
+    /// Add neighborhood function \a p with identifier \a id
+    void add(const std::string& id, NEIGHBORHOOD_CONSTRAINT p);
 
-// STATISTICS: search-seq
+    void post(const FlatZincSpace&, ConExpr const* ce);
+
+    /// Post constraint specified by \a ce
+    std::vector<ConExpr const*> neighborhoodConstraints();
+
+    bool isSource(ConExpr const* ce) const;
+
+  private:
+    /// The actual neighborhood registry
+    std::map<std::string,NEIGHBORHOOD_CONSTRAINT> r;
+
+    std::set<ConExpr const*> sources;
+
+    std::vector<ConExpr const*> neighborhoods;
+  };
+
+}}
+
+#endif
+
+// STATISTICS: flatzinc-any

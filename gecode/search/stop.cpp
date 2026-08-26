@@ -70,6 +70,10 @@ namespace Gecode { namespace Search {
     return s.node > l.load(std::memory_order_acquire);
   }
 
+  bool NodeStop::done() const {
+    return false;
+  }
+
 
   /*
    * Stopping for failure limit
@@ -80,6 +84,9 @@ namespace Gecode { namespace Search {
     return s.fail > l.load(std::memory_order_acquire);
   }
 
+  bool FailStop::done() const {
+    return false;
+  }
 
   /*
    * Stopping for time limit
@@ -87,6 +94,11 @@ namespace Gecode { namespace Search {
    */
   bool
   TimeStop::stop(const Statistics&, const Options&) {
+    return done();
+  }
+
+  bool
+  TimeStop::done() const {
     const clock::rep now = clock::now().time_since_epoch().count();
     const clock::duration elapsed(now - t0.load(std::memory_order_acquire));
     return std::chrono::duration<double, std::milli>(elapsed).count() >
@@ -100,6 +112,11 @@ namespace Gecode { namespace Search {
   bool
   RestartStop::stop(const Statistics& s, const Options&) {
     return s.restart > l.load(std::memory_order_acquire);
+  }
+
+  bool
+  RestartStop::done() const {
+    return false;
   }
 
 }}

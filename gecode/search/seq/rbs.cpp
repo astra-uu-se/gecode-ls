@@ -58,6 +58,11 @@ namespace Gecode { namespace Search { namespace Seq {
     return false;
   }
 
+  bool
+  RestartStop::done() const {
+    return m_stop != nullptr && m_stop->done();
+  }
+
   Space*
   RBS::next(void) {
     if (restart) {

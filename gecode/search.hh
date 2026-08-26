@@ -809,6 +809,7 @@ namespace Gecode { namespace Search {
     Stop(void);
     /// Stop search, if returns true
     virtual bool stop(const Statistics& s, const Options& o) = 0;
+    virtual bool done(void) const = 0;
     /// Destructor
     virtual ~Stop(void);
     //@}
@@ -850,6 +851,7 @@ namespace Gecode { namespace Search {
     void limit(unsigned long long int l);
     /// Return true if node limit is exceeded
     virtual bool stop(const Statistics& s, const Options& o);
+    virtual bool done(void) const;
   };
 
   /**
@@ -877,6 +879,7 @@ namespace Gecode { namespace Search {
     void limit(unsigned long long int l);
     /// Return true if failure limit is exceeded
     virtual bool stop(const Statistics& s, const Options& o);
+    virtual bool done(void) const;
   };
 
   /**
@@ -906,6 +909,7 @@ namespace Gecode { namespace Search {
     void reset(void);
     /// Return true if time limit is exceeded
     virtual bool stop(const Statistics& s, const Options& o);
+    virtual bool done(void) const;
   };
 
   /**
@@ -929,6 +933,7 @@ namespace Gecode { namespace Search {
     void limit(unsigned long long int l);
     /// Return true if failure limit is exceeded
     virtual bool stop(const Statistics& s, const Options& o);
+    virtual bool done(void) const;
   };
 
 }}
@@ -1198,6 +1203,7 @@ namespace Gecode {
   public:
     /// Initialize engine for space \a s and options \a o
     RBS(T* s, const Search::Options& o);
+    RBS(T* s, const Search::Options& o, const std::shared_ptr<std::atomic<bool>>& optimum_found, const std::shared_ptr<std::vector<std::shared_ptr<Space>>>& all_best_solutions);
     /// Whether engine does best solution search
     static const bool best = E<T>::best;
   };

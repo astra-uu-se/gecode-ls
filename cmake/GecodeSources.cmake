@@ -237,10 +237,15 @@ set(GECODE_FLATZINC_SOURCES
   gecode/flatzinc/blackbox-process-posix.cpp
   gecode/flatzinc/blackbox-process-windows.cpp
   gecode/flatzinc/blackbox-propagator.cpp
+  gecode/flatzinc/lnsheuristics/lnsheuristics.cpp
   gecode/flatzinc/branch.cpp
+  gecode/flatzinc/dependencygraph.cpp
   gecode/flatzinc/flatzinc.cpp
+  gecode/flatzinc/incumbent.cpp
   gecode/flatzinc/lexer.yy.cpp
+  gecode/flatzinc/lnsheuristicregistry.cpp
   gecode/flatzinc/parser.tab.cpp
+  gecode/flatzinc/portfolio.cpp
   gecode/flatzinc/registry.cpp
 )
 

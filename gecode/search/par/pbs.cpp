@@ -45,6 +45,12 @@ namespace Gecode { namespace Search { namespace Par {
       ((so != nullptr) && so->stop(s,o));
   }
 
+  bool
+  PortfolioStop::done() const {
+    return tostop->load(std::memory_order_acquire) ||
+      ((so != nullptr) && so->done());
+  }
+
 }}}
 
 // STATISTICS: search-par

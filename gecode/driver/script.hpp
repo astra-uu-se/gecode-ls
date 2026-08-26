@@ -53,17 +53,20 @@ namespace Gecode { namespace Driver {
     Search::FailStop* fs; ///< Used fail stop object
     Search::TimeStop* ts; ///< Used time stop object
     Search::RestartStop* rs; ///< Used restart stop object
+    std::shared_ptr<std::atomic<bool>> search_finished; ///< True if solution has been found.
     GECODE_DRIVER_EXPORT
     static bool sigint;   ///< Whether search was interrupted using Ctrl-C
     /// Initialize stop object
     CombinedStop(unsigned long long int node,
                  unsigned long long int fail,
                  double time,
-                 unsigned long long int restart)
+                 unsigned long long int restart,
+                 const std::shared_ptr<std::atomic<bool>> &search_finished)
       : ns((node > 0ULL) ? new Search::NodeStop(node) : nullptr),
         fs((fail > 0ULL) ? new Search::FailStop(fail) : nullptr),
         ts((time > 0.0)  ? new Search::TimeStop(time) : nullptr),
-        rs((restart > 0.0) ? new Search::RestartStop(restart) : nullptr) {
+        rs((restart > 0) ? new Search::RestartStop(restart) : nullptr),
+        search_finished(search_finished) {
       sigint = false;
     }
   public:
@@ -73,16 +76,26 @@ namespace Gecode { namespace Driver {
       SR_FAIL = 1 << 1, ///< Fail limit reached
       SR_TIME = 1 << 2, ///< Time limit reached
       SR_RESTART = 1 << 3, ///< Time limit reached
-      SR_INT  = 1 << 4  ///< Interrupted by user
+      SR_INT  = 1 << 4,  ///< Interrupted by user
+      SR_SOLUTION = 1 << 5 ///< Solution found
     };
     /// Test whether search must be stopped
     virtual bool stop(const Search::Statistics& s, const Search::Options& o) {
       return
         sigint ||
+        (search_finished != nullptr && search_finished->load()) ||
         ((ns != nullptr) && ns->stop(s,o)) ||
         ((fs != nullptr) && fs->stop(s,o)) ||
         ((ts != nullptr) && ts->stop(s,o)) ||
         ((rs != nullptr) && rs->stop(s,o));
+    }
+    [[nodiscard]] bool done() const override {
+      return sigint ||
+        (search_finished != nullptr && search_finished->load()) ||
+        ((ns != nullptr) && ns->done()) ||
+        ((fs != nullptr) && fs->done()) ||
+        ((ts != nullptr) && ts->done()) ||
+        ((rs != nullptr) && rs->done());
     }
     /// Report reason why search has been stopped
     int reason(const Search::Statistics& s, const Search::Options& o) {
@@ -91,19 +104,27 @@ namespace Gecode { namespace Driver {
         (((fs != nullptr) && fs->stop(s,o)) ? SR_FAIL : 0) |
         (((ts != nullptr) && ts->stop(s,o)) ? SR_TIME : 0) |
         (((rs != nullptr) && rs->stop(s,o)) ? SR_RESTART : 0) |
-        (sigint                          ? SR_INT  : 0);
+        (sigint                             ? SR_INT  : 0) |
+        (search_finished                    ? SR_SOLUTION : 0);
+    }
+    void update_time(double time) {
+      delete ts;
+      if (time > 0.0) {
+        ts = new Search::TimeStop(time);
+      }
     }
     /// Create appropriate stop-object
     static Search::Stop*
     create(unsigned long long int node,
            unsigned long long int fail,
            double time,
-					 unsigned long long int restart,
-           bool intr) {
+           unsigned long long int restart,
+           bool intr,
+           const std::shared_ptr<std::atomic<bool>>& search_finished) {
       if (!intr && (node == 0ULL) && (fail == 0ULL) && (time == 0.0) && (restart == 0ULL))
         return nullptr;
       else
-        return new CombinedStop(node,fail,time,restart);
+        return new CombinedStop(node,fail,time,restart,search_finished);
     }
 #ifdef GECODE_THREADS_WINDOWS
     /// Handler for catching Ctrl-C

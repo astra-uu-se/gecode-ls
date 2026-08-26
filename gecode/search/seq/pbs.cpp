@@ -48,6 +48,11 @@ namespace Gecode { namespace Search { namespace Seq {
     return false;
   }
 
+  bool
+  PortfolioStop::done() const {
+    return (so != nullptr) && so->done();
+  }
+
 }}}
 
 // STATISTICS: search-seq

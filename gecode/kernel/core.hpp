@@ -1670,6 +1670,8 @@ namespace Gecode {
     /// Number of asset in portfolio
     const unsigned int a;
     //@}
+    // The best solutions found so far during PBS.
+    std::shared_ptr<std::vector<std::shared_ptr<Space>>> all_best_solutions;
   public:
     /// \name Constructors depending on type of engine
     //@{
@@ -1680,6 +1682,13 @@ namespace Gecode {
              unsigned long long int f,
              const Space* l,
              NoGoods& ng);
+    MetaInfo(unsigned long int r,
+             RestartReason rr,
+             unsigned long long int s,
+             unsigned long long int f,
+             const Space* l,
+             NoGoods& ng,
+             const std::shared_ptr<std::vector<std::shared_ptr<Space>>>& all_best_solutions);
     /// Constructor for portfolio-based engine
     MetaInfo(unsigned int a);
     //@}
@@ -3150,7 +3159,20 @@ namespace Gecode {
                      unsigned long long int f0,
                      const Space* l0,
                      NoGoods& ng0)
-    : t(RESTART), r(r0), rr(rr0), s(s0), f(f0), l(l0), ng(ng0), a(0) {}
+    : t(RESTART), r(r0), rr(rr0), s(s0), f(f0), l(l0), ng(ng0), a(0), all_best_solutions(nullptr) {}
+
+  /*
+   * Information from meta search engines
+   */
+  forceinline
+  MetaInfo::MetaInfo(unsigned long int r0,
+                     RestartReason rr0,
+                     unsigned long long int s0,
+                     unsigned long long int f0,
+                     const Space* l0,
+                     NoGoods& ng0,
+                     const std::shared_ptr<std::vector<std::shared_ptr<Space>>>& sols)
+    : t(RESTART), r(r0), rr(rr0), s(s0), f(f0), l(l0), ng(ng0), a(0), all_best_solutions(sols) {}
 
   forceinline
   MetaInfo::MetaInfo(unsigned int a0)

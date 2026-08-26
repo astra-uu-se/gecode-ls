@@ -40,7 +40,11 @@ namespace Gecode { namespace Search { namespace Seq {
 
   forceinline
   RestartStop::RestartStop(Stop* s)
-    : l(0U), m_stop(s), e_stopped(false) {}
+    : l(0U), m_stop(s), e_stopped(false), optimum_found(nullptr) {}
+
+  forceinline
+  RestartStop::RestartStop(Stop* s, const std::shared_ptr<std::atomic<bool>> &optimum_found)
+    : l(0U), m_stop(s), e_stopped(false), optimum_found(optimum_found) {}
 
   forceinline unsigned long int
   RestartStop::restarts(void) const {

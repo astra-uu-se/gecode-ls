@@ -1,10 +1,10 @@
 /* -*- mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*- */
 /*
  *  Main authors:
- *     Christian Schulte <schulte@gecode.dev>
+ *     Guido Tack <tack@gecode.dev>
  *
  *  Copyright:
- *     Christian Schulte, 2015
+ *     Guido Tack, 2007
  *
  *  This file is part of Gecode, the generic constraint
  *  development environment:
@@ -31,28 +31,38 @@
  *
  */
 
-#include <gecode/search/seq/rbs.hh>
+#ifndef GECODE_FLATZINC_NEIGHBORHOOD_HH
+#define GECODE_FLATZINC_NEIGHBORHOOD_HH
 
-namespace Gecode { namespace Search { namespace Seq {
+#include <gecode/flatzinc.hh>
+#include <string>
+#include <map>
 
-  Stop*
-  rbsstop(Stop* stop) {
-    return new RestartStop(stop);
-  }
+namespace Gecode { namespace FlatZinc {
+  class FlatZincSpace;
 
-  Stop*
-  rbsstop(Stop* stop, const std::shared_ptr<std::atomic<bool>> &optimum_found) {
-    return new RestartStop(stop, optimum_found);
-  }
+  /// Map from constraint identifier to constraint posting functions
+  class GECODE_FLATZINC_EXPORT LnsHeuristicRegistry {
+  public:
+    /// Type of constraint posting function
+    typedef std::shared_ptr<LnsHeuristic> (*poster) (FlatZincSpace&,
+                                                     const ConExpr&,
+                                                     AST::Node*);
+    /// Add posting function \a p with identifier \a id
+    void add(const std::string& id, poster p);
+    /// Post constraint specified by \a ce
+    std::shared_ptr<LnsHeuristic> post(FlatZincSpace& s, const ConExpr& ce);
 
-  Engine*
-  rbsengine(Space* master, Stop* stop, Engine* slave,
-            const Search::Statistics& stat, const Options& opt, bool best) {
-    return new RBS(master,static_cast<RestartStop*>(stop), slave,
-                   stat,opt,best);
-  }
+  private:
+    /// The actual registry
+    std::map<std::string,poster> r;
+  };
 
+  /// Return global registry object
+  GECODE_FLATZINC_EXPORT LnsHeuristicRegistry& lnsHeuristicRegistry(void);
 
-}}}
+}}
 
-// STATISTICS: search-seq
+#endif
+
+// STATISTICS: flatzinc-any
