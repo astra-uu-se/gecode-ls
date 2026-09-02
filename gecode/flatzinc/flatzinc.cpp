@@ -787,17 +787,21 @@ namespace Gecode { namespace FlatZinc {
     : Space(f),
       _initData(nullptr), _random(f._random),
       _solveAnnotations(nullptr),
+      heuristic(f.heuristic),
+      _lns(f._lns),
+      last_best_restart(f.heuristic == nullptr || *(f.heuristic) < 0 ? nullptr : (f.last_best_restart != nullptr ? f.last_best_restart : std::make_shared<unsigned long>(0))),
+      last_best_objective(f.heuristic == nullptr || *(f.heuristic) < 0 ? nullptr : (f.last_best_objective != nullptr ? f.last_best_objective : std::make_shared<int>(0))),
       _lnsHeuristics(f._lnsHeuristics),
       restart_data(f.restart_data),
       iv_boolalias(nullptr),
 #ifdef GECODE_HAS_FLOAT_VARS
       step(f.step),
 #endif
+    _incumbentSolution(f._incumbentSolution),
       needAuxVars(f.needAuxVars) {
     _optVar = f._optVar;
     _optVarIsInt = f._optVarIsInt;
     _method = f._method;
-    _lns = f._lns;
     _lnsInitialSolution = f._lnsInitialSolution;
     branchInfo = f.branchInfo;
     iv.update(*this, f.iv);
@@ -824,7 +828,7 @@ namespace Gecode { namespace FlatZinc {
     }
 
     bv.update(*this, f.bv);
-    bv.update(*this, f.bv_lns);
+    bv_lns.update(*this, f.bv_lns);
     boolVarCount = f.boolVarCount;
     if (needAuxVars) {
       BoolVarArgs bva;
@@ -872,8 +876,11 @@ namespace Gecode { namespace FlatZinc {
   FlatZincSpace::FlatZincSpace(Rnd& random)
   :  _initData(new FlatZincSpaceInitData),
     intVarCount(-1), boolVarCount(-1), floatVarCount(-1), setVarCount(-1),
-    _optVar(-1), _optVarIsInt(true), _lns(0), _lnsInitialSolution(0),
+    _optVar(-1), _optVarIsInt(true), _lns(nullptr), _lnsInitialSolution(0),
     _random(random),
+    last_best_objective(nullptr),
+    last_best_restart(nullptr),
+    _incumbentSolution(std::make_shared<IncumbentSolution>()),
     _solveAnnotations(nullptr), needAuxVars(true) {
     branchInfo.init();
   }
@@ -1076,6 +1083,26 @@ namespace Gecode { namespace FlatZinc {
     ConExprOrder ceo;
     std::sort(ces.begin(), ces.end(), ceo);
 
+    _lnsHeuristics.clear();
+    _lnsHeuristics.reserve(2 * 5 + 2);
+    for (const bool dependencyCuration : std::array<bool,2>{false,true}) {
+      std::array<std::shared_ptr<LnsHeuristic>, 5> heuristics{
+        std::make_shared<NaiveRandom>(*this, dependencyCuration),
+        std::make_shared<PropagationGuided>(*this, dependencyCuration),
+        std::make_shared<ReversePropagationGuided>(*this, dependencyCuration),
+        std::make_shared<CostImpactGuided>(*this, dependencyCuration),
+        std::make_shared<StaticVariableRelationGuided>(*this, dependencyCuration, ces)};
+      for (const auto& h : heuristics) {
+        if (h->applicable()) {
+          _lnsHeuristics.emplace_back(h);
+        }
+      }
+    }
+    auto org = std::make_shared<ObjectiveRelaxationGuided>(*this, ces);
+    if (org->applicable()) {
+      _lnsHeuristics.emplace_back(org);
+    }
+
     DependencyGraph dg;
 
     // create dependency graph
@@ -1092,7 +1119,10 @@ namespace Gecode { namespace FlatZinc {
       neighborhoods.emplace_back(lnsHeuristicRegistry().post(*this, *nc[i]));
     }
 
-    _lnsHeuristics.emplace_back(std::make_shared<LnsHeuristicCombinator>(std::move(neighborhoods)));
+    auto lhc = std::make_shared<LnsHeuristicCombinator>(std::move(neighborhoods));
+    if (lhc->applicable()) {
+      _lnsHeuristics.emplace_back(lhc);
+    }
 
     for (unsigned int i=0; i<ces.size(); i++) {
       const ConExpr& ce = *ces[i];
@@ -1108,6 +1138,41 @@ namespace Gecode { namespace FlatZinc {
     }
   }
 
+  void FlatZincSpace::shrinkLnsHeuristicArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new,
+    const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) {
+    for (int i = static_cast<int>(_lnsHeuristics.size()) - 1; i >= 0; --i) {
+      _lnsHeuristics.at(i)->shrinkArrays(iv_new, bv_new, fv_new, sv_new);
+      if (!_lnsHeuristics.at(i)->applicable()) {
+        std::swap(_lnsHeuristics.at(i), _lnsHeuristics.back());
+        _lnsHeuristics.pop_back();
+      }
+    }
+  }
+
+  void FlatZincSpace::pruneLnsHeuristics(const bool onlyGenericHeuristics) {
+    if (!onlyGenericHeuristics) {
+      return;
+    }
+    for (int i = static_cast<int>(_lnsHeuristics.size()) - 1; i >= 0; --i) {
+      if (!std::dynamic_pointer_cast<GenericHeuristic>(_lnsHeuristics.at(i))) {
+        std::swap(_lnsHeuristics.at(i), _lnsHeuristics.back());
+        _lnsHeuristics.pop_back();
+      }
+    }
+  }
+
+  void FlatZincSpace::cloneLnsHeuristics() {
+    std::vector<std::shared_ptr<LnsHeuristic>> cloned_heuristics(_lnsHeuristics.size(), nullptr);
+    for (size_t i = 0; i < _lnsHeuristics.size(); ++i) {
+      if (_lnsHeuristics.at(i)->requires_cloning()) {
+        cloned_heuristics.at(i) = _lnsHeuristics.at(i)->clone();
+      } else {
+        cloned_heuristics.at(i) = _lnsHeuristics.at(i);
+      }
+    }
+    _lnsHeuristics = cloned_heuristics;
+  }
+
   void FlatZincSpace::populateLnsVariables() {
     if (iv_lns.size() == 0) {
       int k = 0;
@@ -1117,7 +1182,7 @@ namespace Gecode { namespace FlatZinc {
       iv_lns = IntVarArray(*this, k);
       k = 0;
       for (int i = 0; i < iv.size(); ++i) {
-        if (intIsFuncDep(i)) {
+        if (!intIsFuncDep(i)) {
           iv_lns[k++] = iv[i];
         }
       }
@@ -1130,7 +1195,7 @@ namespace Gecode { namespace FlatZinc {
       bv_lns = BoolVarArray(*this, k);
       k = 0;
       for (int i = 0; i < bv.size(); ++i) {
-        if (intIsFuncDep(i)) {
+        if (!boolIsFuncDep(i)) {
           bv_lns[k++] = bv[i];
         }
       }
@@ -1156,7 +1221,7 @@ namespace Gecode { namespace FlatZinc {
   }
 
   void
-  FlatZincSpace::createBranchers(Printer&p, AST::Node* ann, FlatZincOptions& opt,
+  FlatZincSpace::createBranchers(const Printer&p, AST::Node* ann, FlatZincOptions& opt,
                                  bool ignoreUnknown,
                                  std::ostream& err) {
     int seed = opt.seed();
@@ -1201,9 +1266,9 @@ namespace Gecode { namespace FlatZinc {
       fv_searched[i] = false;
 #endif
 
-    _lns = 75;
     opt.restart(RM_CONSTANT);
     opt.restart_scale(500);
+    _lns = std::make_shared<unsigned int>(0);
     if (ann) {
       std::vector<AST::Node*> flatAnn;
       if (ann->isArray()) {
@@ -1234,7 +1299,7 @@ namespace Gecode { namespace FlatZinc {
         } else if (flatAnn[i]->isCall("restart_none")) {
           opt.restart(RM_NONE);
         } else if (flatAnn[i]->isCall("relax_and_reconstruct")) {
-          if (_lns != 0)
+          if (*_lns != 0)
             throw FlatZinc::Error("FlatZinc",
             "Only one relax_and_reconstruct annotation allowed");
           AST::Call *call = flatAnn[i]->getCall("relax_and_reconstruct");
@@ -1244,7 +1309,7 @@ namespace Gecode { namespace FlatZinc {
           } else {
             args = call->getArgs(3);
           }
-          _lns = args->a[1]->getInt();
+          *_lns = args->a[1]->getInt();
           AST::Array *vars = args->a[0]->getArray();
           int k=vars->a.size();
           for (int i=vars->a.size(); i--;)
@@ -1831,18 +1896,18 @@ namespace Gecode { namespace FlatZinc {
         }
       }
     }
-    for (unsigned int i = 0; i < iv_init.size(); ++i) {
+    for (int i = 0; i < iv_init.size(); ++i) {
       if (iv_init[i].has_value()) {
         rel(*this, iv[i], IRT_EQ, iv_init[i].value());
       }
     }
-    for (unsigned int i = 0; i < bv_init.size(); ++i) {
+    for (int i = 0; i < bv_init.size(); ++i) {
       if (bv_init[i].has_value()) {
         rel(*this, bv[i], IRT_EQ, bv_init[i].value() == true ? 1 : 0);
       }
     }
 #ifdef GECODE_HAS_FLOAT_VARS
-    for (unsigned int i = 0; i < fv_init.size(); ++i) {
+    for (int i = 0; i < fv_init.size(); ++i) {
       if (fv_init[i].has_value()) {
         rel(*this, fv[i], FRT_EQ, fv_init[i].value());
       }
@@ -2293,8 +2358,13 @@ namespace Gecode { namespace FlatZinc {
 #endif
 
   void
-  FlatZincSpace::run(std::ostream& out, const Printer& p,
-                      const FlatZincOptions& opt, Support::Timer& t_total) {
+  FlatZincSpace::run(std::ostream& out, Printer &p,
+                     const FlatZincOptions& opt, Support::Timer& t_total) {
+    if (opt.portfolio()) {
+      return runPortfolio(out, p, opt, t_total);
+    }
+    shrinkArrays(p);
+    pruneLnsHeuristics(opt.generic());
 #ifndef GECODE_HAS_GIST
     if (opt.mode() == SM_GIST)
       throw FlatZinc::Error("FlatZinc",
@@ -2312,33 +2382,96 @@ namespace Gecode { namespace FlatZinc {
   }
 
   void
-  FlatZincSpace::runPortfolio(std::ostream& out, Printer& p, FlatZincOptions& opt, Support::Timer& t_total) {
-    SearchController assetSearch(this, out, p, opt, t_total);
-    if (!assetSearch.init()) {
+  FlatZincSpace::runPortfolio(std::ostream& out, Printer &p, const FlatZincOptions& opt, Support::Timer& t_total) {
+    Support::Timer propTimer;
+    propTimer.start();
+    StatusStatistics statusStatistics;
+    const SpaceStatus preSearchProp = status(statusStatistics);
+    const double initTime = propTimer.stop();
+    // Make search space clone-able by calling status on it. If it fails, then the model is unsatisfiable.
+    // If the space is unsatisfiable before the search even starts, then finish and print statistics through dummy asset.
+    if (preSearchProp == SS_FAILED) {
+      out << "=====UNSATISFIABLE=====" << std::endl;
+      // Create dummy asset so that information about UNSAT space can be printed out:
       return;
     }
+
+    SearchController assetSearch(this, out, p, opt, t_total);
+    // Populate the initial solution
+    if (hasInitialIncumbentSolution(solveAnnotations())) {
+      auto* clone = deepClone();
+      clone->applyInitialIncumbentSolution(solveAnnotations());
+      const auto sol = std::shared_ptr<FlatZincSpace>(dynamic_cast<FlatZincSpace*>(clone->clone()));
+      delete clone;
+      assetSearch.updateBestSolution(sol, std::numeric_limits<unsigned int>::max());
+    }
+    shrinkArrays(p);
+    pruneLnsHeuristics(opt.generic());
+    assetSearch.createAssets(propTimer.stop());
     assetSearch.run();
   }
 
   void
   FlatZincSpace::constrain(const Space& s) {
+    if (_method == SAT) {
+      return;
+    }
+    const auto& miSpace = dynamic_cast<const FlatZincSpace&>(s);
+    const bool isLns = heuristic != nullptr;
+    const auto global_solution = _incumbentSolution->load();
+
     if (_optVarIsInt) {
-      if (_method == MIN)
-        rel(*this, iv[_optVar], IRT_LE,
-                   static_cast<const FlatZincSpace*>(&s)->iv[_optVar].val());
-      else if (_method == MAX)
-        rel(*this, iv[_optVar], IRT_GR,
-                   static_cast<const FlatZincSpace*>(&s)->iv[_optVar].val());
+      const IntRelType objIrl = _method == MIN ? (isLns ? IRT_LQ : IRT_LE) : (isLns ? IRT_GQ : IRT_GR);
+      const int local_objective = miSpace.iv[miSpace._optVar].val();
+      const int best_objective = (global_solution != nullptr && global_solution->iv[global_solution->_optVar].assigned())
+          // Make sure the global solution exists and that it is assigned.
+        ? (_method == MIN
+          ? std::min(local_objective, global_solution->iv[global_solution->_optVar].val())
+          : std::max(local_objective, global_solution->iv[global_solution->_optVar].val()))
+        : local_objective;
+
+      rel(*this, iv[_optVar], objIrl, best_objective);
     } else {
 #ifdef GECODE_HAS_FLOAT_VARS
-      if (_method == MIN)
-        rel(*this, fv[_optVar], FRT_LE,
-                   static_cast<const FlatZincSpace*>(&s)->fv[_optVar].val()-step);
-      else if (_method == MAX)
-        rel(*this, fv[_optVar], FRT_GR,
-                   static_cast<const FlatZincSpace*>(&s)->fv[_optVar].val()+step);
+      const FloatVal local_objective = miSpace.fv[_optVar].val();
+      if (global_solution != nullptr) {
+        const FloatVal global_objective = global_solution->fv[global_solution->_optVar].val();
+        if (_method == MIN){
+          const FloatVal best_objective = std::min(local_objective, global_objective);
+          rel(*this, fv[_optVar], FRT_LE, best_objective-step);
+        }
+        else if (_method == MAX){
+          const FloatVal best_objective = std::max(local_objective, global_objective);
+          rel(*this, fv[_optVar], FRT_GR, best_objective+step);
+        }
+      }
+      else{
+        if (_method == MIN){
+          rel(*this, fv[_optVar], FRT_LE, local_objective-step);
+        }
+
+        else if (_method == MAX){
+          rel(*this, fv[_optVar], FRT_GR, local_objective+step);
+        }
+      }
 #endif
     }
+  }
+
+  bool
+  FlatZincSpace::updateLastBest(const MetaInfo& mi, const FlatZincSpace& last) {
+    if (_method == SAT) {
+      return false;
+    }
+    const int obj =
+      !last.optVarIsInt() || last.optVar() < 0 ? 0 : last.iv[last.optVar()].val();
+
+    if (_method == MIN ? (obj < *last_best_objective) : (obj > *last_best_objective)) {
+      *last_best_objective = obj;
+      *last_best_restart = mi.restart();
+      return true;
+    }
+    return false;
   }
 
   bool
@@ -2528,25 +2661,39 @@ namespace Gecode { namespace FlatZinc {
       }
     }
 
-    if ((mi.type() == MetaInfo::RESTART) && (mi.restart() != 0) &&
-        (_lns > 0) && (mi.last()==nullptr) && (_lnsInitialSolution.size()>0)) {
-      for (unsigned int i=iv_lns.size(); i--;) {
-        if (_random(99U) <= _lns) {
-          rel(*this, iv_lns[i], IRT_EQ, _lnsInitialSolution[i]);
-        }
+    /// naive update of freeze factor
+    if (mi.restart() != 0 && mi.restart() > *last_best_restart){
+      const unsigned long diff = mi.restart() - *last_best_restart;
+      if (*_lns >= 90 && diff > 150) {
+        *_lns = 5;
+      } else {
+        const int change = diff > 50 ? 1 : -1;
+        *_lns = std::max<int>(5, std::min<int>(90, static_cast<int>(*_lns) + change));
       }
-      return false;
-    } else if ((mi.type() == MetaInfo::RESTART) && (mi.restart() != 0) &&
-               (_lns > 0) && mi.last()) {
-      const FlatZincSpace& last =
-        static_cast<const FlatZincSpace&>(*mi.last());
-      if (!_lnsHeuristics.empty()) {
-        _lnsHeuristics.front()->heuristic(last, *this);
+    }
+
+    if ((mi.type() == MetaInfo::RESTART) && (mi.restart() != 0) && heuristic != nullptr) {
+      // Is there a previous solution:
+      if (*heuristic >= _lnsHeuristics.size()) {
         return false;
       }
-      for (unsigned int i=iv_lns.size(); i--;) {
-        if (_random(99U) <= _lns) {
-          rel(*this, iv_lns[i], IRT_EQ, last.iv_lns[i]);
+      if (_incumbentSolution != nullptr) {
+        shared_ptr<const FlatZincSpace> last = _incumbentSolution->load_random();
+        if (last != nullptr) {
+          const bool foundNewSolution = updateLastBest(mi, *last);
+          return _lnsHeuristics.at(*heuristic)->heuristic(*last, *this, mi, foundNewSolution);
+        }
+      }
+      if (mi.last() != nullptr) {
+        const auto& last = dynamic_cast<const FlatZincSpace&>(*mi.last());
+        const bool foundNewSolution = updateLastBest(mi, last);
+        return _lnsHeuristics.at(*heuristic)->heuristic(last, *this, mi, foundNewSolution);
+      }
+      if (_lnsInitialSolution.size() > 0) {
+        for (unsigned int i = iv_lns.size(); i--;) {
+          if (_random(99U) <= *_lns) {
+            rel(*this, iv_lns[i], IRT_EQ, _lnsInitialSolution[i]);
+          }
         }
       }
       return false;
@@ -2576,7 +2723,7 @@ namespace Gecode { namespace FlatZinc {
 
   unsigned int
   FlatZincSpace::freezePercent() const {
-    return _lns;
+    return _lns == nullptr ? 0 : *_lns;
   }
 
   int
@@ -3519,6 +3666,12 @@ namespace Gecode { namespace FlatZinc {
     fv = FloatVarArray(home, fva);
     fv_names = fv_names_new;
 #endif
+
+  auto* fzs = dynamic_cast<FlatZincSpace*>(&home);
+    if (fzs) {
+      fzs->shrinkLnsHeuristicArrays(iv_new, bv_new, fv_new, sv_new);
+    }
+
   }
 
   Printer::~Printer(void) {

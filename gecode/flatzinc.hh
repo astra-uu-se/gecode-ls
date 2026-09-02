@@ -252,8 +252,8 @@ namespace Gecode { namespace FlatZinc {
 
       // MAB options
       Gecode::Driver::BoolOption        _portfolio; //< Whether to use portfolio or default BAB
+      Gecode::Driver::BoolOption        _generic; //< Whether to use only generic LNS heuristics or not
       Gecode::Driver::BoolOption        _no_mab; //< Whether to use round-robbin or multi-armed bandit
-      Gecode::Driver::IntOption         _assets; //< How many assets to use for portfolio
 
       /// \name Execution options
       //@{
@@ -294,7 +294,7 @@ namespace Gecode { namespace FlatZinc {
                  true),
       _step("step","step distance for float optimization",0.0),
       _portfolio("portfolio", "whether to use portfolio-based-search or not", false), // ADDED
-      _assets("assets","the number of assets to use with portfolio-based search", 8), // ADDED
+      _generic("generic", "whether to use only generic LNS heuristics or not", false), // ADDED
       _no_mab("no-mab", "use static assets instead of MAB", false), // ADDED
 
       _mode("mode","how to execute script",Gecode::SM_SOLUTION),
@@ -324,7 +324,7 @@ namespace Gecode { namespace FlatZinc {
       add(_step);
 
       add(_portfolio);
-      add(_assets);
+      add(_generic);
       add(_no_mab);
 
       add(_restart); add(_r_base); add(_r_scale); add(_r_limit);
@@ -370,7 +370,7 @@ namespace Gecode { namespace FlatZinc {
 
     bool stat(void) const { return _stat.value(); }
     bool portfolio(void) const { return _portfolio.value(); }
-    int assets(void) const { return _assets.value(); }
+    bool generic(void) const { return _generic.value(); }
     bool mab(void) const { return !_no_mab.value(); }
 
     Gecode::ScriptMode mode(void) const {
@@ -470,7 +470,7 @@ namespace Gecode { namespace FlatZinc {
     Meth _method;
 
     /// Percentage of variables to keep in LNS (or 0 for no LNS)
-    unsigned int _lns;
+    std::shared_ptr<unsigned int> _lns;
 
     /// Initial solution to start the LNS (or nullptr for no LNS)
     IntSharedArray _lnsInitialSolution;
@@ -513,6 +513,13 @@ namespace Gecode { namespace FlatZinc {
     Gecode::FloatVarArray fv_lns;
     /// The set variables used in LNS
     Gecode::SetVarArray sv_lns;
+
+    /// the LNS heuristic index to use for search (-1 for no heuristic)
+    std::shared_ptr<int> heuristic{nullptr};
+    /// restart index of the last found best solution
+    std::shared_ptr<unsigned long> last_best_restart;
+    /// objective from the previously best found solution
+    std::shared_ptr<int> last_best_objective;
 
     /* === Experimental `on_restart` support === */
     class OnRestartHandle : public SharedHandle {
@@ -648,6 +655,12 @@ namespace Gecode { namespace FlatZinc {
     /// Post a constraint specified by \a ce
     void postConstraints(std::vector<ConExpr*>& ces);
 
+    void shrinkLnsHeuristicArrays(const std::map<int, int> & iv_new, const std::map<int, int> & bv_new, const std::map<int, int> & fv_new, const std::map<int, int> & sv_new);
+
+    void pruneLnsHeuristics(bool onlyGenericHeuristics);
+
+    void cloneLnsHeuristics();
+
     /// populate the source variables
     void populateLnsVariables();
 
@@ -661,10 +674,10 @@ namespace Gecode { namespace FlatZinc {
     void maximize(int var, bool isInt, AST::Array* annotation);
 
     /// Run the search
-    void run(std::ostream& out, const Printer& p,
+    void run(std::ostream& out, Printer &p,
              const FlatZincOptions& opt, Gecode::Support::Timer& t_total);
 
-    void runPortfolio(std::ostream &out, Printer &p, FlatZincOptions &opt, Support::Timer &t_total);
+    void runPortfolio(std::ostream &out, Printer &p, const FlatZincOptions &opt, Support::Timer &t_total);
 
     /// Produce output on \a out using \a p
     void print(std::ostream& out, const Printer& p) const;
@@ -713,7 +726,7 @@ namespace Gecode { namespace FlatZinc {
      * The seed for random branchers is given by the \a seed parameter.
      *
      */
-    void createBranchers(Printer& p, AST::Node* ann,
+    void createBranchers(const Printer& p, AST::Node* ann,
                          FlatZincOptions& opt, bool ignoreUnknown,
                          std::ostream& err = std::cerr);
 
@@ -729,6 +742,9 @@ namespace Gecode { namespace FlatZinc {
 
     /// Implement optimization
     virtual void constrain(const Space& s);
+
+    bool updateLastBest(const MetaInfo &mi, const FlatZincSpace &last);
+
     /// Copy function
     virtual Gecode::Space* copy(void);
     /// Slave function for restarts
@@ -793,8 +809,11 @@ namespace Gecode { namespace FlatZinc {
   class GECODE_FLATZINC_EXPORT LnsHeuristic {
   public:
     virtual ~LnsHeuristic() = default;
-    virtual void heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next) = 0;
-    [[nodiscard]] virtual bool applicable(const FlatZincSpace& incumbent) const = 0;
+    [[nodiscard]] virtual std::shared_ptr<LnsHeuristic> clone() const = 0;
+    [[nodiscard]] virtual bool requires_cloning() const { return false; };
+    virtual void shrinkArrays(const std::map<int,int>& iv_new, const std::map<int,int>& bv_new, const std::map<int,int>& fv_new, const std::map<int,int>& sv_new) = 0;
+    virtual bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) = 0;
+    [[nodiscard]] virtual bool applicable() const = 0;
   };
 
   /// %Exception class for %FlatZinc errors

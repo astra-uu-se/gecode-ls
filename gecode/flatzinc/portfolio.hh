@@ -234,30 +234,21 @@ public:
                   });
     }
 };
-/// Multi armed bandit
+/// Exp3 Multi armed bandit
 class Bandit {
 protected:
-    size_t _totalCount{0};
-    double _ucb{0.0};
+    unsigned int _numArms;
+    unsigned int _totalCount{0};
+    std::vector<double> _weights;
+    std::vector<double> _probabilities;
 
-    size_t _numArms;
-    /// Often called epsilon
-    double _temperature;
-    std::vector<double> _totalReward;
-    std::vector<double> _averageReward;
-    std::vector<size_t> _armTotalCount;
-
-    static size_t randomArm(std::vector<double>& weights);
+    mutable std::random_device _gen;
+    double _temperature; /// Often called learning rate, gamma, or eta. ∈[0,1).
 
 public:
-    explicit Bandit(size_t numArms, double temperature = 0.1, double learningRate = 0.1);
-
-    virtual ~Bandit() = default;
-    void updateReward(size_t arm, double reward);
-    void updateRewardUCB(size_t arm, double reward, double beta=1.0);
-    [[nodiscard]] size_t bestArm() const;
-    [[nodiscard]] size_t randomArm() const;
-    [[nodiscard]] size_t softMax(double tau = 0.1) const;
+    explicit Bandit(unsigned int numArms, double temperature = 0.10772173);
+    [[nodiscard]] unsigned int getArm() const;
+    void updateReward(unsigned int arm, unsigned int wins);
 };
 
 
@@ -267,9 +258,9 @@ class AssetExecutor : public Gecode::Support::Runnable {
     /// The running asset.
     BaseAsset* asset;
     // The options for the FlatZinc space and search.
-    FlatZincOptions& fopt;
+    const FlatZincOptions& fopt;
     // Printer (Stores the output variables)
-    FlatZinc::Printer& p;
+    const FlatZinc::Printer& p;
     // The asset for this search.
     unsigned int asset_id;
     // If run search or not.
@@ -280,8 +271,8 @@ class AssetExecutor : public Gecode::Support::Runnable {
 
 public:
     // Constructor
-    AssetExecutor(SearchController& control, BaseAsset* asset, FlatZincOptions& fopt, unsigned int asset_id, bool do_search)
-    : control(control), asset(asset), fopt(fopt), p(p), asset_id(asset_id), do_search(do_search) {}
+    AssetExecutor(SearchController& control, BaseAsset* asset, const FlatZincOptions& fopt, unsigned int asset_id, bool do_search);
+
     // Run the search.
     void run() override {do_search ? runSearch() : runShaving();};
 };
@@ -290,10 +281,9 @@ class BaseAsset {
 protected:
     FlatZincSpace& _originalFlatZincSpace;
     FlatZincSpace* _curFlatZincSpace;
-    FlatZincOptions& _flatZincOptions;
+    const FlatZincOptions& _flatZincOptions;
     StatusStatistics _statusStatistics;
     unsigned int _assetId;
-    size_t _banditArmId;
     AssetType _assetType;
 
     unsigned int _numPropagators{0};
@@ -301,16 +291,14 @@ protected:
     size_t _numSolutions{0};
     string _assetStr{};
 
-    BaseAsset(FlatZincSpace& flatZincSpace, FlatZincSpace* curFlatZincSpace, FlatZincOptions& flatZincOptions, unsigned int assetId,
+    BaseAsset(FlatZincSpace& flatZincSpace, FlatZincSpace* curFlatZincSpace, const FlatZincOptions& flatZincOptions, unsigned int assetId,
         AssetType);
 
     std::shared_ptr<Search::Options> generateSearchOptions(FlatZincSpace&, Search::Stop*) const;
 
-    [[nodiscard]] bool sortFlatAnnotations() const;
-
 
 public:
-    BaseAsset(FlatZincSpace& flatZincSpace, FlatZincOptions& flatZincOptions) :
+    BaseAsset(FlatZincSpace& flatZincSpace, const FlatZincOptions& flatZincOptions) :
     BaseAsset(flatZincSpace, nullptr, flatZincOptions, 0, AssetType::DUMMY) {}
     virtual ~BaseAsset() {
         delete _curFlatZincSpace;
@@ -366,10 +354,8 @@ public:
     virtual void increaseSolveTime(double time) {
         _solveTime += time;
     }
-    [[nodiscard]] bool oppositeBranching() const;
-    [[nodiscard]] bool pbsBranching() const;
     [[nodiscard]] virtual int banditArmId() const { return -1; };
-    virtual void updateBanditArmId() {};
+    virtual void updateBanditArm() {};
     [[nodiscard]] virtual bool runNextRound();
     virtual void updateTimeout() {};
     [[nodiscard]] size_t numSolutions() const { return _numSolutions; }
@@ -378,7 +364,7 @@ public:
 
 class DFSAsset : public BaseAsset {
 public:
-    DFSAsset(SearchController& searchController, FlatZincSpace& fg, FlatZincOptions& fopt,
+    DFSAsset(SearchController& searchController, FlatZincSpace& fg, const FlatZincOptions& fopt,
         unsigned int assetId, unsigned int numThreads);
 
     ~DFSAsset() override {
@@ -417,9 +403,9 @@ private:
 
 class LNSAsset : public BaseAsset {
 public:
-    LNSAsset(SearchController& searchController, FlatZincSpace& fg, FlatZincOptions& fopt,
+    LNSAsset(SearchController& searchController, FlatZincSpace& fg, const FlatZincOptions& fopt,
         unsigned int assetId, unsigned int lnsNeighborhoodIndex, RestartMode restartMode = RM_CONSTANT, double restartBase = 1,
-        unsigned int restartScale = 3000);
+        int restartScale = 3000);
 
     ~LNSAsset() override {
         delete _engine;
@@ -443,6 +429,7 @@ public:
     SearchController& _searchController;
 
 private:
+    unsigned int _lnsNeighborhoodIndex;
     RestartMode _restartMode;
     double _restartBase;
     unsigned int _restartScale;
@@ -454,9 +441,9 @@ private:
 
 class BanditArmAsset : public BaseAsset {
 public:
-    BanditArmAsset(SearchController& searchController, FlatZincSpace& fg, FlatZincOptions& fopt,
+    BanditArmAsset(SearchController& searchController, FlatZincSpace& fg, const FlatZincOptions& fopt,
         unsigned int assetId, RestartMode restartMode = RM_NONE, double restartBase = 1.5,
-        unsigned int restartScale = 250);
+        int restartScale = 250);
 
     ~BanditArmAsset() override {
         delete _engine;
@@ -482,7 +469,7 @@ public:
 
     void setShavingStart(long unsigned int start) override { _shavingStart = start; }
     void setEngine(BaseEngine* engine) override { this->_engine = dynamic_cast<RBSEngine*>(engine); }
-    void updateBanditArmId() override;
+    void updateBanditArm() override;
     [[nodiscard]] bool runNextRound() override;
     void updateTimeout() override;
 
@@ -492,12 +479,14 @@ public:
 private:
     RestartMode _restartMode;
     double _restartBase;
-    unsigned int _restartScale;
+    int _restartScale;
     AssetExecutor* executor;
     std::shared_ptr<Search::Options> _searchOptions{nullptr};
     RBSEngine* _engine{nullptr};
     long unsigned int _shavingStart{0};
     Support::Timer _timeout;
+    int _banditArm;
+    std::shared_ptr<int> heuristic;
 
     const double defaultTime{5000};
     std::optional<double> time;
@@ -508,7 +497,7 @@ private:
 
 class RoundRobinLNSAsset : public BaseAsset {
 public:
-    RoundRobinLNSAsset(SearchController& control, FlatZincSpace& fg, FlatZincOptions& fopt,
+    RoundRobinLNSAsset(SearchController& control, FlatZincSpace& fg, const FlatZincOptions& fopt,
         unsigned int asset_id);
     ;
     void run() override;
@@ -537,7 +526,7 @@ private:
 
 class ShavingAsset : public BaseAsset {
 public:
-    ShavingAsset(SearchController& control, FlatZincSpace& fg, FlatZincOptions& fopt, unsigned int assetId, int maxDomShavingSize, bool do_bounds_shaving, VariableSorter* sorter);
+    ShavingAsset(SearchController& control, FlatZincSpace& fg, const FlatZincOptions& fopt, unsigned int assetId, int maxDomShavingSize, bool do_bounds_shaving, VariableSorter* sorter);
 
     ~ShavingAsset() override {
         delete _sorter;
@@ -567,9 +556,10 @@ private:
 class SearchController {
 public:
     // Methods
-    SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, Printer& printer, FlatZincOptions& flatZincOptions, Support::Timer& timerTotal); // constructor
+    SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, const Printer& printer, const FlatZincOptions& flatZincOptions, Support::Timer& timerTotal); // constructor
     ~SearchController(); // destructor
-    bool init();
+    // Sets up the asset used by the portfolio.
+    void createAssets(double initTime);
     void run();
     // Emplace forbidden literal.
     void report_forbidden_literal(Literal forbidden) { _forbiddenLiterals.push_back(forbidden); }
@@ -584,10 +574,10 @@ public:
     // Variables
     // Intial search space.
     FlatZinc::FlatZincSpace* _flatZincSpace;
-    FlatZincOptions& _flatZincOptions;
+    const FlatZincOptions& _flatZincOptions;
     StatusStatistics _statusStatistics;
     // The printer for the assets.
-    FlatZinc::Printer& _printer;
+    const FlatZinc::Printer& _printer;
     Support::Timer& _timerTotal;
     std::ostream& _ostream;
     // The number of assets.
@@ -623,8 +613,6 @@ private:
     void createAsset(AssetType asset, unsigned int assetId);
 
     void updateMultiArmedBandit();
-    // Sets up the asset used by the portfolio.
-    void createAssets(double initTime);
     // Gives the statistics of the solution. (TODO: Make it possible to output from all engines and/or spaces)
     void solutionStatistics(BaseAsset* asset, Support::Timer& t_total, unsigned int finished_asset);
 

@@ -1,6 +1,7 @@
 #include <gecode/flatzinc/incumbent.hh>
 #include <unordered_set>
 #include <bits/random.h>
+#include <random>
 
 namespace Gecode { namespace FlatZinc {
 

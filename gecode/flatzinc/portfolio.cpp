@@ -25,7 +25,7 @@
 
 namespace Gecode { namespace FlatZinc {
 
-SearchController::SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, Printer& printer, FlatZincOptions& flatZincOptions, Support::Timer& timerTotal)
+SearchController::SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, const Printer& printer, const FlatZincOptions& flatZincOptions, Support::Timer& timerTotal)
     : _flatZincSpace(flatZincSpace),
       _ostream(out),
       _printer(printer),
@@ -45,7 +45,7 @@ void SearchController::thread_done() {
 }
 
 bool SearchController::updateBestSolution(const std::shared_ptr<FlatZincSpace> &sol,
-                                          unsigned int asset_id) {
+                                          const unsigned int asset_id) {
     // If the optimum was found, then stop there is no need to update the best solution.
     for (const auto& intVar : sol->iv) {
         assert(intVar.assigned());
@@ -89,7 +89,9 @@ bool SearchController::updateBestSolution(const std::shared_ptr<FlatZincSpace> &
                 _ostream << "%% objective: " << sol->iv[sol->optVar()] << std::endl;
             }
         }
-        _assets[asset_id]->incrSolutions(1);
+        if (asset_id < _assets.size()) {
+            _assets[asset_id]->incrSolutions(1);
+        }
     }
     _solutionMutex.unlock();
 
@@ -244,7 +246,7 @@ void SearchController::updateMultiArmedBandit() {
 
 void SearchController::createAssets(double initTime) {
     // Since the BAB asset that uses non failing propagators will finish almost immediately, an extra asset is created.
-    const unsigned int numAssets = _flatZincOptions.threads() <= 1 ? 2 : (_flatZincOptions.threads() + 1);
+    const unsigned int numAssets = true ? _flatZincOptions.threads() : (_flatZincOptions.threads() <= 1 ? 2 : (_flatZincOptions.threads() + 1));
 
     // Vector of asset type and the number of threads to use for that asset type.
     std::array<std::pair<AssetType, bool>, 1> defaultCompleteTypes{std::pair<AssetType, bool>{AssetType::SYSTEMATIC_SEARCH, false}};
@@ -263,7 +265,7 @@ void SearchController::createAssets(double initTime) {
     // Create complete assets:
     int assetId = 0;
     for (const auto [completeAsset, useNonFailingPropagators] : defaultCompleteTypes) {
-        if (numAssets > 2 || useNonFailingPropagators)
+        if (assetId < numCompleteAssets || useNonFailingPropagators)
         {
             createAsset(completeAsset, assetId);
             ++assetId;
@@ -285,45 +287,6 @@ void SearchController::createAssets(double initTime) {
         asset->increaseSolveTime(initTime);
         asset->setStatusStatistics(_statusStatistics);
     }
-}
-
-// The controller that creates the workers and controls the searches.
-bool SearchController::init() {
-    Support::Timer propTimer;
-    propTimer.start();
-    const SpaceStatus preSearchProp = _flatZincSpace->status(_statusStatistics);
-    const double initTime = propTimer.stop();
-    // Make search space clone-able by calling status on it. If it fails, then the model is unsatisfiable.
-    // If the space is unsatisfiable before the search even starts, then finish and print statistics through dummy asset.
-    if (preSearchProp == SS_FAILED) {
-        _ostream << "=====UNSATISFIABLE=====" << std::endl;
-        // Create dummy asset so that information about UNSAT space can be printed out:
-        if (_assets.empty()) {
-            _assets.emplace_back(std::make_unique<BaseAsset>(*_flatZincSpace, _flatZincOptions));
-        } else {
-            _assets[0] = std::make_unique<BaseAsset>(*_flatZincSpace, _flatZincOptions);
-        }
-        _assets[0]->setStatusStatistics(_statusStatistics);
-        _assets[0]->increaseSolveTime(initTime);
-        if (_flatZincOptions.mode() == SM_STAT) {
-            _assets[0]->setAssetTypeStr("none");
-            solutionStatistics(_assets[0].get(), _timerTotal, -1);
-        }
-        return false;
-    }
-
-    // Populate the initial solution
-    if (FlatZincSpace::hasInitialIncumbentSolution(_flatZincSpace->solveAnnotations())) {
-        auto* clone = _flatZincSpace->deepClone();
-        clone->applyInitialIncumbentSolution(_flatZincSpace->solveAnnotations());
-        const auto sol = std::shared_ptr<FlatZincSpace>(dynamic_cast<FlatZincSpace*>(clone->clone()));
-        delete clone;
-        updateBestSolution(sol, std::numeric_limits<unsigned int>::max());
-    }
-
-    // setup and create the assets.
-    createAssets(initTime);
-    return true;
 }
 
 // The controller that creates the workers and controls the searches.
@@ -367,77 +330,34 @@ void SearchController::run() {
 // ########################################################################
 //                         Multi Armed Bandit below.
 // ########################################################################
-Bandit::Bandit(const size_t numArms, const double temperature, const double learningRate) :
+Bandit::Bandit(const unsigned int numArms, const double temperature) :
     _numArms(numArms),
-    _temperature(temperature),
-    _totalReward(numArms, 0.0),
-    _averageReward(numArms, 0.0),
-    _armTotalCount(numArms, 0) {}
+    _weights(numArms, 1.0),
+    _probabilities(numArms, 1.0/static_cast<double>(numArms)),
+    _gen(),
+    _temperature(temperature) {}
 
-size_t Bandit::randomArm(std::vector<double>& weights) {
-    std::random_device rd;
-    std::mt19937_64 generator(rd());
-    auto distro = std::discrete_distribution<size_t>(weights.begin(), weights.end());
-    return distro(generator);
+unsigned int Bandit::getArm() const {
+    auto distro = std::discrete_distribution<int>(_probabilities.begin(), _probabilities.end());
+    return distro(_gen);
 }
 
-
-size_t Bandit::randomArm() const {
-    std::random_device rd;
-    std::mt19937_64 generator(rd());
-
-    std::uniform_real_distribution<double> epsilon_distro(0, 1);
-    const double rand_num = epsilon_distro(generator);
-
-    if (rand_num < _temperature) {
-        //random action
-        std::uniform_int_distribution<size_t> action_distro(0, _numArms - 1);
-        return action_distro(generator);
-    }
-    //greedy action
-    return std::distance(_averageReward.begin(), std::max_element(_averageReward.begin(), _averageReward.end()));
-}
-
-size_t Bandit::softMax(const double tau) const {
-
-    std::vector<double> weights(_numArms);
-    for (size_t i = 0; i < _numArms; i++) {
-        weights[i] = std::exp(_averageReward[i] / tau);
-    }
-
-    double denominator = 0;
-    for (size_t i = 0; i < _numArms; i++) {
-        denominator += weights[i];
-    }
-    for (size_t i = 0; i < _numArms; i++) {
-        weights[i] /= denominator;
-    }
-
-    return randomArm(weights);
-
-}
-
-void Bandit::updateReward(const size_t arm, const double reward) {
+void Bandit::updateReward(const unsigned int arm, const unsigned int wins) {
     assert(arm < _numArms);
-    ++_totalCount;
-    ++_armTotalCount[arm];
-    _totalReward[arm] += reward;
-    _averageReward[arm] += _totalReward[arm] / static_cast<double>(_armTotalCount[arm]);
-}
+    const double reward = std::tanh(wins); // sigmoid, maps to [0,1)
 
-void Bandit::updateRewardUCB(const size_t arm, const double reward, const double beta) {
-    assert(arm < _numArms);
-    ++_totalCount;
-    ++_armTotalCount[arm];
-    _ucb = std::sqrt(2 * beta * std::log(static_cast<double>(_armTotalCount[arm]) / static_cast<double>(_armTotalCount[arm])));
-    const double ucbReward = reward + _ucb;
-    _totalReward[arm] += ucbReward;
-    _averageReward[arm] = _totalReward[arm]/static_cast<double>(_armTotalCount[arm]);
-}
+    for (size_t j = 0; j < _numArms; j++) {
+        const double estimated_reward = j == arm ? reward/_probabilities[j] : 0;
+        _weights[j] = _weights[j] * std::exp(_temperature * estimated_reward /static_cast<double>(_numArms));
+    }
 
-
-size_t Bandit::bestArm() const {
-    return std::distance(_averageReward.begin(), std::max_element(_averageReward.begin(), _averageReward.end()));
+    double sum_weights = 0.0;
+    for (size_t j = 0; j < _numArms; j++) {
+        sum_weights += _weights[j];
+    }
+    for (size_t i = 0; i < _numArms; i++) {
+        _probabilities[i] = (1.0-_temperature)*(_weights[i]/sum_weights) + _temperature/static_cast<double>(_numArms);
+    }
 }
 
 // ########################################################################
@@ -459,7 +379,7 @@ void AssetExecutor::runSearch() {
     size_t round = 0;
 
     do {
-        asset->updateBanditArmId();
+        asset->updateBanditArm();
         // update engine with new timeout
         if (round > 0) {
             asset->updateTimeout();
@@ -620,11 +540,14 @@ void AssetExecutor::runShaving() {
     control.thread_done();
 }
 
+AssetExecutor::AssetExecutor(SearchController &control, BaseAsset *asset, const FlatZincOptions &fopt, unsigned int asset_id,
+    bool do_search): control(control), asset(asset), fopt(fopt), p(control._printer), asset_id(asset_id), do_search(do_search) {}
+
 // ########################################################################
 //                         Assets Below.
 // ########################################################################
 
-BaseAsset::BaseAsset(FlatZincSpace &flatZincSpace, FlatZincSpace *curFlatZincSpace, FlatZincOptions &flatZincOptions,
+BaseAsset::BaseAsset(FlatZincSpace &flatZincSpace, FlatZincSpace *curFlatZincSpace, const FlatZincOptions &flatZincOptions,
     unsigned int assetId, AssetType assetType):
 _originalFlatZincSpace(flatZincSpace),
 _curFlatZincSpace(curFlatZincSpace),
@@ -660,6 +583,7 @@ std::shared_ptr<Search::Options> BaseAsset::generateSearchOptions(FlatZincSpace&
     if (_flatZincOptions.interrupt()) {
         Driver::CombinedStop::installCtrlHandler(true);
     }
+
     return searchOptions;
 }
 
@@ -667,14 +591,12 @@ bool BaseAsset::runNextRound() {
     return false;
 }
 
-DFSAsset::DFSAsset(SearchController &searchController, FlatZincSpace& fg, FlatZincOptions &fopt,
+DFSAsset::DFSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
                    unsigned int assetId, unsigned int numThreads) :
 BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::SYSTEMATIC_SEARCH),
 _searchController(searchController),
 _numThreads(numThreads),
 executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
-    _curFlatZincSpace->createBranchers(searchController._printer, _originalFlatZincSpace.solveAnnotations(), _flatZincOptions, false, std::cerr);
-
     assert(_searchOptions == nullptr);
     _searchOptions = std::make_shared<Search::Options>();
     _searchOptions->c_d = _searchOptions->c_d;
@@ -702,10 +624,11 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
     }
 }
 
-LNSAsset::LNSAsset(SearchController &searchController, FlatZincSpace& fg, FlatZincOptions &fopt,
-    unsigned int assetId, unsigned int lnsNeighborhoodIndex, RestartMode restartMode, double restartBase, unsigned int restartScale)
+LNSAsset::LNSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
+    unsigned int assetId, unsigned int lnsNeighborhoodIndex, RestartMode restartMode, double restartBase, int restartScale)
 : BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::LOCAL_SEARCH),
 _searchController(searchController),
+_lnsNeighborhoodIndex(lnsNeighborhoodIndex),
 _restartMode(restartMode),
 _restartBase(restartBase),
 _restartScale(restartScale),
@@ -715,37 +638,40 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
         Driver::CombinedStop::installCtrlHandler(true);
     }
 
-    // If not RBS but asset is to use it:
-    if (_flatZincOptions.restart() == RM_NONE) {
-        _flatZincOptions.restart(_restartMode);
-        _flatZincOptions.restart_base(_restartBase);
-        _flatZincOptions.restart_scale(_restartScale);
+    // if asset uses restart-based search:
+    FlatZincOptions brancherOptions(_flatZincOptions);
+    if (brancherOptions.restart() == RM_NONE) {
+        brancherOptions.restart(_restartMode);
+        brancherOptions.restart_base(_restartBase);
+        brancherOptions.restart_scale(_restartScale);
     }
 
     assert(_searchOptions == nullptr);
     _searchOptions = generateSearchOptions(
         _originalFlatZincSpace,
         Driver::CombinedStop::create(
-            _flatZincOptions.node(),
-            _flatZincOptions.fail(), // this should be constant 3000
-            _flatZincOptions.time(),
-            _flatZincOptions.restart_limit(), // this should be 0
+            brancherOptions.node(),
+            brancherOptions.fail(), // this should be constant 3000
+            brancherOptions.time(),
+            brancherOptions.restart_limit(), // this should be 0
             true,
             searchController._optimumFound));
 
-    _curFlatZincSpace->createBranchers(searchController._printer, _originalFlatZincSpace.solveAnnotations(), _flatZincOptions, false, std::cerr);
+    _curFlatZincSpace->cloneLnsHeuristics();
 
     _engine = new RBSEngine(_curFlatZincSpace, *_searchOptions, searchController._optimumFound, searchController._allBestSolutions);
 }
 
-BanditArmAsset::BanditArmAsset(SearchController &searchController, FlatZincSpace& fg, FlatZincOptions &fopt,
-    unsigned int assetId, RestartMode restartMode, double restartBase, unsigned int restartScale)
+BanditArmAsset::BanditArmAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
+    unsigned int assetId, RestartMode restartMode, double restartBase, int restartScale)
 : BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::LOCAL_SEARCH),
 _searchController(searchController),
 _restartMode(restartMode),
 _restartBase(restartBase),
 _restartScale(restartScale),
-executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
+executor(new AssetExecutor(searchController, this, fopt, assetId, true)),
+_banditArm(std::numeric_limits<int>::max()),
+heuristic(std::make_shared<int>(_banditArm)) {
     _timeout.start();
 
     if (_flatZincOptions.interrupt()) {
@@ -754,9 +680,7 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
 
     // If not RBS but asset is to use it:
     if (_flatZincOptions.restart() == RM_NONE && _restartMode != RM_NONE) {
-        _flatZincOptions.restart(_restartMode);
-        _flatZincOptions.restart_base(_restartBase);
-        _flatZincOptions.restart_scale(_restartScale);
+        ;
     }
 
     const double timeout = std::min(defaultTime,  _flatZincOptions.time() - _timeout.stop());
@@ -770,31 +694,31 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
             _flatZincOptions.restart_limit(),
             true,
             _searchController._optimumFound));
-
-    _curFlatZincSpace->createBranchers(_searchController._printer, _originalFlatZincSpace.solveAnnotations(), _flatZincOptions, false, std::cerr);
+    _curFlatZincSpace->cloneLnsHeuristics();
+    _curFlatZincSpace->heuristic = heuristic;
 
     _engine = new RBSEngine(_curFlatZincSpace, *_searchOptions, _searchController._optimumFound, _searchController._allBestSolutions);
 }
 
-void BanditArmAsset::updateBanditArmId() {
-    if (_banditArmId < 0) {
-        return;
-    }
+void BanditArmAsset::updateBanditArm() {
     // lock
     _searchController._banditMutex.lock();
 
     // update reward if bandit has not changed.
     if (_searchController.banditTimestamp() == _banditTimestamp) {
-        _searchController._bandit->updateReward(_banditArmId, static_cast<double>(_numCurSolutions));
+        _searchController._bandit->updateReward(_banditArm, _numCurSolutions);
     }
     // get new arm
-    _banditArmId = _searchController._bandit->softMax();
+    _banditArm = static_cast<int>(_searchController._bandit->getArm());
     // update local parameters
     _banditTimestamp = _searchController.banditTimestamp();
     // unlock
     _searchController._banditMutex.unlock();
 
     _numCurSolutions = 0;
+
+    // update current FlatZincSpace:
+    *heuristic = _banditArm;
 }
 
 bool BanditArmAsset::runNextRound() {
@@ -810,7 +734,7 @@ void BanditArmAsset::updateTimeout() {
     }
 }
 
-RoundRobinLNSAsset::RoundRobinLNSAsset(SearchController &control, FlatZincSpace& fg, FlatZincOptions &fopt,
+RoundRobinLNSAsset::RoundRobinLNSAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptions &fopt,
                                        unsigned int asset_id) :
 BaseAsset(fg, nullptr, fopt, asset_id, AssetType::DUMMY),
 best_asset(nullptr), control(control) {
@@ -822,7 +746,7 @@ best_asset(nullptr), control(control) {
     }
 }
 
-ShavingAsset::ShavingAsset(SearchController &control, FlatZincSpace& fg, FlatZincOptions &fopt,
+ShavingAsset::ShavingAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptions &fopt,
     unsigned int assetId, int maxDomShavingSize,
     bool do_bounds_shaving, VariableSorter *sorter): BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::SHAVING),
                                                      control(control),

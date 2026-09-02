@@ -3,8 +3,8 @@
   "name": "Gecode",
   "description": "Gecode FlatZinc executable",
   "version": "@GECODE_VERSION@",
-  "mznlib": "@GECODE_MSC_MZNLIB_FROM_SOLVERDIR@",
-  "executable": "@GECODE_MSC_EXECUTABLE_FROM_SOLVERDIR@",
+  "mznlib": "../../../gecode/flatzinc/mznlib/",
+  "executable": ["../../bin/fzn-gecode", "--portfolio"],
   "tags": ["cp", "int", "float", "set", "restart"],
   "stdFlags": [@GECODE_MSC_STD_FLAGS@],
   "extraFlags": [
@@ -23,7 +23,9 @@
     ["--restart-scale", "Scale factor for restart sequence", "int", "250"],
     ["--restart-limit", "Restart cutoff", "int", "0"],
     ["--nogoods", "Use no-goods from restarts", "bool", "false"],
-    ["--nogoods-limit", "Depth limit for no-good extraction", "int", "128"]
+    ["--nogoods-limit", "Depth limit for no-good extraction", "int", "128"],
+    ["--portfolio", "whether to use portfolio-based-search or not", "bool", "false"],
+    ["--generic", "whether to use only generic LNS heuristics or not", "bool", "false"]
   ],
   "supportsMzn": false,
   "supportsFzn": true,
