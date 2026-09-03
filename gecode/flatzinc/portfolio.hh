@@ -12,9 +12,9 @@
 #include <memory>
 #include <atomic>
 #include <vector>
-#include <array>
 #include <string>
 #include <sstream>
+#include <optional>
 #include <limits>
 #include <unordered_set>
 #include <bits/random.h>
