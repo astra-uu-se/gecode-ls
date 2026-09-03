@@ -55,6 +55,7 @@
 #include <limits>
 #include <memory>
 #include <unordered_set>
+#include <optional>
 
 #include <gecode/flatzinc/incumbent.hh>
 

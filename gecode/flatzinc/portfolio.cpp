@@ -4,20 +4,16 @@
 #include <iostream>
 #include <fstream>
 #include <gecode/flatzinc.hh>
-#include <gecode/flatzinc/registry.hh>
 #include <gecode/flatzinc/plugin.hh>
 #include <gecode/flatzinc/branch.hh>
 #include <gecode/search.hh>
 #include <gecode/flatzinc/portfolio.hh>
 #include <gecode/flatzinc/searchengine.hh>
-#include <gecode/flatzinc/branchmodifier.hh>
 
 #include <array>
 #include <vector>
 #include <string>
-#include <sstream>
 #include <limits>
-#include <unordered_set>
 #include <bits/random.h>
 #include <random>
 
