@@ -1519,6 +1519,8 @@ namespace Gecode { namespace FlatZinc {
             err << std::endl;
           }
 #endif
+        } else if (flatAnn[i]->isCall("warm_start")) {
+          ;
         } else {
           if (!ignoreUnknown) {
             err << "Warning, ignored search annotation: ";
