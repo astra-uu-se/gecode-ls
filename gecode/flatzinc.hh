@@ -254,6 +254,7 @@ namespace Gecode { namespace FlatZinc {
       Gecode::Driver::BoolOption        _portfolio; //< Whether to use portfolio or default BAB
       Gecode::Driver::BoolOption        _generic; //< Whether to use only generic LNS heuristics or not
       Gecode::Driver::BoolOption        _no_mab; //< Whether to use round-robbin or multi-armed bandit
+      Gecode::Driver::BoolOption        _no_systematic; //< Whether to use systematic search or not
 
       /// \name Execution options
       //@{
@@ -296,6 +297,7 @@ namespace Gecode { namespace FlatZinc {
       _portfolio("portfolio", "whether to use portfolio-based-search or not", false), // ADDED
       _generic("generic", "whether to use only generic LNS heuristics or not", false), // ADDED
       _no_mab("no-mab", "use static assets instead of MAB", false), // ADDED
+      _no_systematic("no-systematic", "whether to use systematic search or not", false), // ADDED
 
       _mode("mode","how to execute script",Gecode::SM_SOLUTION),
       _stat("s","emit statistics"),
@@ -326,6 +328,7 @@ namespace Gecode { namespace FlatZinc {
       add(_portfolio);
       add(_generic);
       add(_no_mab);
+      add(_no_systematic);
 
       add(_restart); add(_r_base); add(_r_scale); add(_r_limit);
       add(_nogoods); add(_nogoods_limit);
@@ -372,6 +375,7 @@ namespace Gecode { namespace FlatZinc {
     bool portfolio(void) const { return _portfolio.value(); }
     bool generic(void) const { return _generic.value(); }
     bool mab(void) const { return !_no_mab.value(); }
+    bool systematic(void) const { return !_no_systematic.value(); }
 
     Gecode::ScriptMode mode(void) const {
       return static_cast<Gecode::ScriptMode>(_mode.value());

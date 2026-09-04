@@ -247,7 +247,7 @@ void SearchController::createAssets(double initTime) {
     // Vector of asset type and the number of threads to use for that asset type.
     std::array<std::pair<AssetType, bool>, 1> defaultCompleteTypes{std::pair<AssetType, bool>{AssetType::SYSTEMATIC_SEARCH, false}};
 
-    constexpr int numCompleteAssets = 1;
+    const int numCompleteAssets = _flatZincOptions.systematic() ? 1 : 0;
     const int numLnsAssets = static_cast<int>(numAssets) - numCompleteAssets;
     const bool useShaving = false && numAssets - numCompleteAssets - numLnsAssets > 0;
 

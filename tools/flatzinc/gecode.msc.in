@@ -25,7 +25,8 @@
     ["--nogoods", "Use no-goods from restarts", "bool", "false"],
     ["--nogoods-limit", "Depth limit for no-good extraction", "int", "128"],
     ["--portfolio", "whether to use portfolio-based-search or not", "bool", "false"],
-    ["--generic", "whether to use only generic LNS heuristics or not", "bool", "false"]
+    ["--generic", "whether to use only generic LNS heuristics or not", "bool", "false"],
+    ["--no-systematic", "whether to use systematic search or not", "bool", "false"]
   ],
   "supportsMzn": false,
   "supportsFzn": true,
