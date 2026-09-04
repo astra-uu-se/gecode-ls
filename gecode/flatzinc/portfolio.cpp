@@ -331,9 +331,18 @@ Bandit::Bandit(const unsigned int numArms, const double temperature) :
     _weights(numArms, 1.0),
     _probabilities(numArms, 1.0/static_cast<double>(numArms)),
     _gen(),
-    _temperature(temperature) {}
+    _temperature(temperature),
+    _initialRoundRobin(numArms) {
+    std::iota(_initialRoundRobin.begin(), _initialRoundRobin.end(), 0);
+    std::shuffle(_initialRoundRobin.begin(), _initialRoundRobin.end(), _gen);
+}
 
-unsigned int Bandit::getArm() const {
+unsigned int Bandit::getArm() {
+    if (!_initialRoundRobin.empty()) {
+        const int arm = _initialRoundRobin.back();
+        _initialRoundRobin.pop_back();
+        return arm;
+    }
     auto distro = std::discrete_distribution<int>(_probabilities.begin(), _probabilities.end());
     return distro(_gen);
 }

@@ -241,13 +241,13 @@ protected:
     unsigned int _totalCount{0};
     std::vector<double> _weights;
     std::vector<double> _probabilities;
-
     mutable std::random_device _gen;
     double _temperature; /// Often called learning rate, gamma, or eta. ∈[0,1).
+    std::vector<int> _initialRoundRobin;
 
 public:
     explicit Bandit(unsigned int numArms, double temperature = 0.10772173);
-    [[nodiscard]] unsigned int getArm() const;
+    [[nodiscard]] unsigned int getArm();
     void updateReward(unsigned int arm, unsigned int wins);
 };
 
