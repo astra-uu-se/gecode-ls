@@ -25,15 +25,15 @@ namespace Gecode { namespace FlatZinc {
             _mutex.unlock();
             return {};
         }
-        const int numVars = _spaces.front()->bv_lns.size() + _spaces.front()->iv_lns.size();
+        const int numVars = _spaces.front()->iv.size() + _spaces.front()->bv.size();
         TupleSet assignments(numVars);
         for (const auto & space : _spaces) {
             IntArgs t(numVars);
-            for (int i = 0; i < space->bv_lns.size(); ++i) {
-                t[i] = space->bv_lns[i].val();
+            for (int i = 0; i < space->iv.size(); ++i) {
+                t[i] = space->iv[i].val();
             }
-            for (int i = 0; i < space->iv_lns.size(); ++i) {
-                t[space->bv_lns.size() + i] = space->iv_lns[i].val();
+            for (int i = 0; i < space->bv.size(); ++i) {
+                t[i + space->iv.size()] = space->bv[i].val();
             }
             assignments.add(t);
         }
@@ -67,17 +67,17 @@ namespace Gecode { namespace FlatZinc {
         bool in_spaces = true;
         for (const auto& space : _spaces)
         {
-            for (int i = 0; i < std::min(space->bv_lns.size(), desired->bv_lns.size()); ++i)
+            for (int i = 0; i < std::min(space->bv.size(), desired->bv.size()); ++i)
             {
-                if (space->bv_lns[i].val() != desired->bv_lns[i].val())
+                if (space->bv[i].val() != desired->bv[i].val())
                 {
                     in_spaces = false;
                     break;
                 }
             }
-            for (int i = 0; in_spaces && i < std::min(space->iv_lns.size(), desired->iv_lns.size()); ++i)
+            for (int i = 0; in_spaces && i < std::min(space->iv.size(), desired->iv.size()); ++i)
             {
-                if (space->iv_lns[i].val() != desired->iv_lns[i].val())
+                if (space->iv[i].val() != desired->iv[i].val())
                 {
                     in_spaces = false;
                     break;
