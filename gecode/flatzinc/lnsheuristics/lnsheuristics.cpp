@@ -879,6 +879,7 @@ void ScheduleUnary::shrinkArrays(const std::map<int, int> &iv_new, const std::ma
     const std::map<int, int> &, const std::map<int, int> &) {
     for (int i = 0; i < vars.size(); ++i) {
         assert(iv_new.find(vars[i]) != iv_new.end());
+        assert(iv_new.find(vars[i])->first == vars[i]);
         vars[i] = iv_new.find(vars[i])->second;
     }
 }
@@ -908,6 +909,11 @@ bool ScheduleUnary::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &nex
         const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
         rel(next, endTime, IRT_LQ, next.iv[vars[chronological[i + 1]]]);
     }
+    // Fix chronological order for tasks end..vars.size()
+    for (int i = end; i + 1 < vars.size(); ++i) {
+        const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
+        rel(next, endTime, IRT_LQ, next.iv[vars[chronological[i + 1]]]);
+    }
     // Tasks in begin..end must start after chronological task begin-1 ends:
     if (begin > 0 && begin + 1 < end) {
         const IntVar preEndTime = expr(next, next.iv[vars[chronological[begin - 1]]] + durations[chronological[begin - 1]]);
@@ -921,11 +927,6 @@ bool ScheduleUnary::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &nex
             const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
             rel(next, endTime, IRT_LQ, next.iv[vars[chronological[end]]]);
         }
-    }
-    // Fix chronological order for tasks end..vars.size()
-    for (int i = end; i + 1 < vars.size(); ++i) {
-        const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
-        rel(next, endTime, IRT_LQ, next.iv[vars[chronological[i + 1]]]);
     }
 
     return false;

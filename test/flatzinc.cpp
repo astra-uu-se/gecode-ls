@@ -146,11 +146,12 @@ namespace Test { namespace FlatZinc {
         Gecode::FlatZinc::parse(ss, p, olog));
 
       if (fg) {
-        fg->createBranchers(p, fg->solveAnnotations(), fznopt,
+        Gecode::FlatZinc::FlatZincOptionsStruct fzos(fznopt);
+        fg->createBranchers(p, fg->solveAnnotations(), fzos,
                             false, olog);
         fg->shrinkArrays(p);
         std::ostringstream os;
-        fg->run(os, p, fznopt, t_total);
+        fg->run(os, p, fzos, t_total);
 
         const std::string output = os.str();
         fg.reset();
@@ -193,13 +194,14 @@ namespace Test { namespace FlatZinc {
     std::ostringstream os;
     try {
       std::stringstream ss(_source);
+      Gecode::FlatZinc::FlatZincOptionsStruct fzos(fznopt);
       std::unique_ptr<Gecode::FlatZinc::FlatZincSpace> fg(
         Gecode::FlatZinc::parse(ss, p, olog));
       if (fg) {
-        fg->createBranchers(p, fg->solveAnnotations(), fznopt,
+        fg->createBranchers(p, fg->solveAnnotations(), fzos,
                             false, olog);
         fg->shrinkArrays(p);
-        fg->run(os, p, fznopt, t_total);
+        fg->run(os, p, fzos, t_total);
       }
       return false;
     } catch (Gecode::FlatZinc::Error& e) {

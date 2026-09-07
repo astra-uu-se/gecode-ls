@@ -790,8 +790,9 @@ namespace Gecode { namespace FlatZinc {
       _solveAnnotations(nullptr),
       heuristic(f.heuristic),
       _lns(f._lns),
+      _diversification(f._diversification),
       last_best_restart(f.heuristic == nullptr || *(f.heuristic) < 0 ? nullptr : (f.last_best_restart != nullptr ? f.last_best_restart : std::make_shared<unsigned long>(0))),
-      last_best_objective(f.heuristic == nullptr || *(f.heuristic) < 0 ? nullptr : (f.last_best_objective != nullptr ? f.last_best_objective : std::make_shared<int>(0))),
+      last_best_objective(f.heuristic == nullptr || *(f.heuristic) < 0 ? nullptr : (f.last_best_objective != nullptr ? f.last_best_objective : std::make_shared<int>(f._method == MIN ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min()))),
       _lnsHeuristics(f._lnsHeuristics),
       restart_data(f.restart_data),
       iv_boolalias(nullptr),
@@ -877,7 +878,7 @@ namespace Gecode { namespace FlatZinc {
   FlatZincSpace::FlatZincSpace(Rnd& random)
   :  _initData(new FlatZincSpaceInitData),
     intVarCount(-1), boolVarCount(-1), floatVarCount(-1), setVarCount(-1),
-    _optVar(-1), _optVarIsInt(true), _lns(nullptr), _lnsInitialSolution(0),
+    _optVar(-1), _optVarIsInt(true), _lns(nullptr), _diversification(nullptr), _lnsInitialSolution(0),
     _random(random),
     last_best_objective(nullptr),
     last_best_restart(nullptr),
@@ -1222,7 +1223,7 @@ namespace Gecode { namespace FlatZinc {
   }
 
   void
-  FlatZincSpace::createBranchers(const Printer&p, AST::Node* ann, FlatZincOptions& opt,
+  FlatZincSpace::createBranchers(const Printer&p, AST::Node* ann, FlatZincOptionsStruct& opt,
                                  bool ignoreUnknown,
                                  std::ostream& err) {
     int seed = opt.seed();
@@ -1267,9 +1268,8 @@ namespace Gecode { namespace FlatZinc {
       fv_searched[i] = false;
 #endif
 
-    opt.restart(RM_CONSTANT);
-    opt.restart_scale(500);
     _lns = std::make_shared<unsigned int>(0);
+    _diversification = std::make_shared<bool>(false);
     if (ann) {
       std::vector<AST::Node*> flatAnn;
       if (ann->isArray()) {
@@ -1531,6 +1531,12 @@ namespace Gecode { namespace FlatZinc {
         }
       }
     }
+    if (opt.restart() == RM_NONE) {
+      opt.restart(RM_CONSTANT);
+      opt.restart_scale(500);
+    }
+
+
     int introduced = 0;
     int funcdep = 0;
     int searched = 0;
@@ -1982,7 +1988,7 @@ namespace Gecode { namespace FlatZinc {
   template<typename S>
   class GistEngine<DFS<S> > {
   public:
-    static void explore(S* root, const FlatZincOptions& opt,
+    static void explore(S* root, const FlatZincOptionsStruct& opt,
                         Gist::Inspector* i, Gist::Comparator* c) {
       Gecode::Gist::Options o;
       o.c_d = opt.c_d(); o.a_d = opt.a_d();
@@ -1996,7 +2002,7 @@ namespace Gecode { namespace FlatZinc {
   template<typename S>
   class GistEngine<BAB<S> > {
   public:
-    static void explore(S* root, const FlatZincOptions& opt,
+    static void explore(S* root, const FlatZincOptionsStruct& opt,
                         Gist::Inspector* i, Gist::Comparator* c) {
       Gecode::Gist::Options o;
       o.c_d = opt.c_d(); o.a_d = opt.a_d();
@@ -2105,7 +2111,7 @@ namespace Gecode { namespace FlatZinc {
   template<template<class> class Engine>
   void
   FlatZincSpace::runEngine(std::ostream& out, const Printer& p,
-                           const FlatZincOptions& opt, Support::Timer& t_total) {
+                           const FlatZincOptionsStruct& opt, Support::Timer& t_total) {
     if (opt.restart()==RM_NONE) {
       runMeta<Engine,Driver::EngineToMeta>(out,p,opt,t_total);
     } else {
@@ -2194,7 +2200,7 @@ namespace Gecode { namespace FlatZinc {
            template<class,template<class> class> class Meta>
   void
   FlatZincSpace::runMeta(std::ostream& out, const Printer& p,
-                         const FlatZincOptions& opt, Support::Timer& t_total) {
+                         const FlatZincOptionsStruct& opt, Support::Timer& t_total) {
 #ifdef GECODE_HAS_GIST
     if (opt.mode() == SM_GIST) {
       BlackBoxContextHandle& black_box_context = BlackBoxAccess::context(*this);
@@ -2234,7 +2240,7 @@ namespace Gecode { namespace FlatZinc {
       if (opt.profiler_info())
         getInfo = new FlatZincGetInfo(p);
       tracer.reset(new CPProfilerSearchTracer(opt.profiler_id(),
-                                              opt.name(), opt.profiler_port(),
+                                              opt.name().value(), opt.profiler_port(),
                                               getInfo));
       o.tracer = tracer.get();
     }
@@ -2362,7 +2368,7 @@ namespace Gecode { namespace FlatZinc {
 
   void
   FlatZincSpace::run(std::ostream& out, Printer &p,
-                     const FlatZincOptions& opt, Support::Timer& t_total) {
+                     const FlatZincOptionsStruct& opt, Support::Timer& t_total) {
     if (opt.portfolio()) {
       return runPortfolio(out, p, opt, t_total);
     }
@@ -2385,7 +2391,7 @@ namespace Gecode { namespace FlatZinc {
   }
 
   void
-  FlatZincSpace::runPortfolio(std::ostream& out, Printer &p, const FlatZincOptions& opt, Support::Timer& t_total) {
+  FlatZincSpace::runPortfolio(std::ostream& out, Printer &p, const FlatZincOptionsStruct& opt, Support::Timer& t_total) {
     Support::Timer propTimer;
     propTimer.start();
     StatusStatistics statusStatistics;
@@ -2420,11 +2426,24 @@ namespace Gecode { namespace FlatZinc {
       return;
     }
     const auto& miSpace = dynamic_cast<const FlatZincSpace&>(s);
-    const bool isLns = heuristic != nullptr;
+    const bool diversification = *_diversification && heuristic != nullptr;
     const auto global_solution = _incumbentSolution->load();
+    if (diversification) {
+      const auto tuple_sets = _incumbentSolution->load_tuple_sets();
+      if (tuple_sets.has_value()) {
+        IntVarArray vars(*this, iv.size() + bv.size());
+        for (int i = 0; i < iv.size(); i++) {
+          vars[i] = iv[i];
+        }
+        for (int i = 0; i < bv.size(); i++) {
+          channel(*this, vars[iv.size() + i], bv[i]);
+        }
+        extensional(*this, vars, *tuple_sets, false);
+      }
+    }
 
     if (_optVarIsInt) {
-      const IntRelType objIrl = _method == MIN ? (isLns ? IRT_LQ : IRT_LE) : (isLns ? IRT_GQ : IRT_GR);
+      const IntRelType objIrl = _method == MIN ? (diversification ? IRT_LQ : IRT_LE) : (diversification ? IRT_GQ : IRT_GR);
       const int local_objective = miSpace.iv[miSpace._optVar].val();
       const int best_objective = (global_solution != nullptr && global_solution->iv[global_solution->_optVar].assigned())
           // Make sure the global solution exists and that it is assigned.
@@ -2669,6 +2688,7 @@ namespace Gecode { namespace FlatZinc {
       const unsigned long diff = mi.restart() - *last_best_restart;
       if (*_lns >= 90 && diff > 150) {
         *_lns = 5;
+        *_diversification = !_diversification;
       } else {
         const int change = diff > 50 ? 1 : -1;
         *_lns = std::max<int>(5, std::min<int>(90, static_cast<int>(*_lns) + change));

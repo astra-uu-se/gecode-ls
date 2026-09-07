@@ -21,7 +21,7 @@
 
 namespace Gecode { namespace FlatZinc {
 
-SearchController::SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, const Printer& printer, const FlatZincOptions& flatZincOptions, Support::Timer& timerTotal)
+SearchController::SearchController(FlatZinc::FlatZincSpace* flatZincSpace, std::ostream& out, const Printer& printer, const FlatZincOptionsStruct& flatZincOptions, Support::Timer& timerTotal)
     : _flatZincSpace(flatZincSpace),
       _ostream(out),
       _printer(printer),
@@ -545,14 +545,14 @@ void AssetExecutor::runShaving() {
     control.thread_done();
 }
 
-AssetExecutor::AssetExecutor(SearchController &control, BaseAsset *asset, const FlatZincOptions &fopt, unsigned int asset_id,
+AssetExecutor::AssetExecutor(SearchController &control, BaseAsset *asset, const FlatZincOptionsStruct &fopt, unsigned int asset_id,
     bool do_search): control(control), asset(asset), fopt(fopt), p(control._printer), asset_id(asset_id), do_search(do_search) {}
 
 // ########################################################################
 //                         Assets Below.
 // ########################################################################
 
-BaseAsset::BaseAsset(FlatZincSpace &flatZincSpace, FlatZincSpace *curFlatZincSpace, const FlatZincOptions &flatZincOptions,
+BaseAsset::BaseAsset(FlatZincSpace &flatZincSpace, FlatZincSpace *curFlatZincSpace, const FlatZincOptionsStruct &flatZincOptions,
     unsigned int assetId, AssetType assetType):
 _originalFlatZincSpace(flatZincSpace),
 _curFlatZincSpace(curFlatZincSpace),
@@ -596,7 +596,7 @@ bool BaseAsset::runNextRound() {
     return false;
 }
 
-DFSAsset::DFSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
+DFSAsset::DFSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptionsStruct &fopt,
                    unsigned int assetId, unsigned int numThreads) :
 BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::SYSTEMATIC_SEARCH),
 _searchController(searchController),
@@ -629,7 +629,7 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
     }
 }
 
-LNSAsset::LNSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
+LNSAsset::LNSAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptionsStruct &fopt,
     unsigned int assetId, unsigned int lnsNeighborhoodIndex, RestartMode restartMode, double restartBase, int restartScale)
 : BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::LOCAL_SEARCH),
 _searchController(searchController),
@@ -644,7 +644,7 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
     }
 
     // if asset uses restart-based search:
-    FlatZincOptions brancherOptions(_flatZincOptions);
+    FlatZincOptionsStruct brancherOptions(_flatZincOptions);
     if (brancherOptions.restart() == RM_NONE) {
         brancherOptions.restart(_restartMode);
         brancherOptions.restart_base(_restartBase);
@@ -667,7 +667,7 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
     _engine = new RBSEngine(_curFlatZincSpace, *_searchOptions, searchController._optimumFound, searchController._allBestSolutions);
 }
 
-BanditArmAsset::BanditArmAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptions &fopt,
+BanditArmAsset::BanditArmAsset(SearchController &searchController, FlatZincSpace& fg, const FlatZincOptionsStruct &fopt,
     unsigned int assetId, RestartMode restartMode, double restartBase, int restartScale)
 : BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::LOCAL_SEARCH),
 _searchController(searchController),
@@ -683,9 +683,10 @@ heuristic(std::make_shared<int>(_banditArm)) {
         Driver::CombinedStop::installCtrlHandler(true);
     }
 
-    // If not RBS but asset is to use it:
-    if (_flatZincOptions.restart() == RM_NONE && _restartMode != RM_NONE) {
-        ;
+    if (_flatZincOptions.restart() == RM_NONE) {
+        _flatZincOptions.restart(_restartMode);
+        _flatZincOptions.restart_base(_restartBase);
+        _flatZincOptions.restart_scale(_restartScale);
     }
 
     const double timeout = std::min(defaultTime,  _flatZincOptions.time() - _timeout.stop());
@@ -727,6 +728,11 @@ void BanditArmAsset::updateBanditArm() {
 }
 
 bool BanditArmAsset::runNextRound() {
+    if (auto const* s = dynamic_cast<Driver::CombinedStop*>(_searchOptions->stop)) {
+        if (!s->done()) {
+            return false;
+        }
+    }
     return !_searchController._optimumFound->load() && _timeout.stop() < _flatZincOptions.time();
 }
 
@@ -739,7 +745,7 @@ void BanditArmAsset::updateTimeout() {
     }
 }
 
-RoundRobinLNSAsset::RoundRobinLNSAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptions &fopt,
+RoundRobinLNSAsset::RoundRobinLNSAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptionsStruct &fopt,
                                        unsigned int asset_id) :
 BaseAsset(fg, nullptr, fopt, asset_id, AssetType::DUMMY),
 best_asset(nullptr), control(control) {
@@ -751,7 +757,7 @@ best_asset(nullptr), control(control) {
     }
 }
 
-ShavingAsset::ShavingAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptions &fopt,
+ShavingAsset::ShavingAsset(SearchController &control, FlatZincSpace& fg, const FlatZincOptionsStruct &fopt,
     unsigned int assetId, int maxDomShavingSize,
     bool do_bounds_shaving, VariableSorter *sorter): BaseAsset(fg, fg.deepClone(), fopt, assetId, AssetType::SHAVING),
                                                      control(control),

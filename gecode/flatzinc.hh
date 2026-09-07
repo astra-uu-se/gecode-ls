@@ -49,6 +49,7 @@
 #include <gecode/float.hh>
 #endif
 #include <map>
+#include <optional>
 
 /*
  * Support for DLLs under Windows
@@ -408,6 +409,132 @@ namespace Gecode { namespace FlatZinc {
     void allSolutions(bool b) { _allSolutions.value(b); }
   };
 
+  struct FlatZincOptionsStruct {
+  private:
+    std::optional<std::string> _name;
+    int _solutions;
+    bool _allSolutions;
+    double _threads;
+    bool _free;
+    unsigned int _c_d;
+    unsigned int _a_d;
+    unsigned long long int _node;
+    unsigned long long int _fail;
+    double _time;
+    int _seed;
+    double _step;
+    const std::optional<std::string> _output;
+
+    bool _stat;
+    bool _portfolio;
+    bool _generic;
+    bool _mab;
+    bool _systematic;
+    Gecode::ScriptMode _mode;
+    double _decay;
+    RestartMode _restart;
+    double _restart_base;
+    unsigned int _restart_scale;
+    unsigned long long int _restart_limit;
+    bool _nogoods;
+    unsigned int _nogoods_limit;
+    bool _interrupt;
+
+#ifdef GECODE_HAS_CPPROFILER
+
+    int _profiler_id;
+    unsigned int _profiler_port;
+    bool _profiler_info;
+
+#endif
+  public:
+    explicit FlatZincOptionsStruct(const FlatZincOptions& opt) :
+      _name(opt.name() == nullptr ? std::optional<std::string>{} : std::optional<std::string>{std::string{opt.name()}}),
+      _solutions(opt.solutions()),
+      _allSolutions(opt.allSolutions()),
+      _threads(opt.threads()),
+      _free(opt.free()),
+      _c_d(opt.c_d()),
+      _a_d(opt.a_d()),
+      _node(opt.node()),
+      _fail(opt.fail()),
+      _time(opt.time()),
+      _seed(opt.seed()),
+      _step(opt.step()),
+      _output(opt.output() == nullptr ? std::optional<std::string>{} : std::optional<std::string>{std::string{opt.output()}}),
+
+      _stat(opt.stat()),
+      _portfolio(opt.portfolio()),
+      _generic(opt.generic()),
+      _mab(opt.mab()),
+      _systematic(opt.systematic()),
+      _mode(opt.mode()),
+      _decay(opt.decay()),
+      _restart(opt.restart()),
+      _restart_base(opt.restart_base()),
+      _restart_scale(opt.restart_scale()),
+      _restart_limit(opt.restart_limit()),
+      _nogoods(opt.nogoods()),
+      _nogoods_limit(opt.nogoods_limit()),
+      _interrupt(opt.interrupt())
+#ifdef GECODE_HAS_CPPROFILER
+      , _profiler_id(opt.profiler_id()),
+      _profiler_port(opt.profiler_port()),
+      _profiler_info(opt.profiler_info())
+#endif
+  {}
+    FlatZincOptionsStruct(const FlatZincOptionsStruct&) = default;
+
+    std::optional<std::string> name(void) const { return _name; };
+    int solutions(void) const { return _solutions; }
+    bool allSolutions(void) const { return _allSolutions; }
+    double threads(void) const { return _threads; }
+    bool free(void) const { return _free; }
+    unsigned int c_d(void) const { return _c_d; }
+    unsigned int a_d(void) const { return _a_d; }
+    unsigned long long int node(void) const { return _node; }
+    unsigned long long int fail(void) const { return _fail; }
+    double time(void) const { return _time; }
+    int seed(void) const { return _seed; }
+    double step(void) const { return _step; }
+    const std::optional<std::string> output(void) const { return _output; }
+
+    bool stat(void) const { return _stat; }
+    bool portfolio(void) const { return _portfolio; }
+    bool generic(void) const { return _generic; }
+    bool mab(void) const { return _mab; }
+    bool systematic(void) const { return _systematic; }
+
+    Gecode::ScriptMode mode(void) const {
+      return _mode;
+    }
+
+    double decay(void) const { return _decay; }
+    RestartMode restart(void) const {
+      return static_cast<RestartMode>(_restart);
+    }
+    void restart(RestartMode rm) {
+      _restart = rm;
+    }
+    double restart_base(void) const { return _restart_base; }
+    void restart_base(double d) { _restart_base = d; }
+    unsigned int restart_scale(void) const { return _restart_scale; }
+    void restart_scale(int i) { _restart_scale = i; }
+    unsigned long long int restart_limit(void) const { return _restart_limit; }
+    bool nogoods(void) const { return _nogoods; }
+    unsigned int nogoods_limit(void) const { return _nogoods_limit; }
+    bool interrupt(void) const { return _interrupt; }
+
+#ifdef GECODE_HAS_CPPROFILER
+
+    int profiler_id(void) const { return _profiler_id; }
+    unsigned int profiler_port(void) const { return _profiler_port; }
+    bool profiler_info(void) const { return true; }
+
+#endif
+
+  };
+
   class BranchInformation : public SharedHandle {
   public:
     /// Constructor
@@ -475,6 +602,7 @@ namespace Gecode { namespace FlatZinc {
 
     /// Percentage of variables to keep in LNS (or 0 for no LNS)
     std::shared_ptr<unsigned int> _lns;
+    std::shared_ptr<bool> _diversification;
 
     /// Initial solution to start the LNS (or nullptr for no LNS)
     IntSharedArray _lnsInitialSolution;
@@ -494,13 +622,13 @@ namespace Gecode { namespace FlatZinc {
     template<template<class> class Engine>
     void
     runEngine(std::ostream& out, const Printer& p,
-              const FlatZincOptions& opt, Gecode::Support::Timer& t_total);
+              const FlatZincOptionsStruct& opt, Gecode::Support::Timer& t_total);
     /// Run the meta search engine
     template<template<class> class Engine,
              template<class, template<class> class> class Meta>
     void
     runMeta(std::ostream& out, const Printer& p,
-            const FlatZincOptions& opt, Gecode::Support::Timer& t_total);
+            const FlatZincOptionsStruct& opt, Gecode::Support::Timer& t_total);
     void
     branchWithPlugin(AST::Node* ann);
   public:
@@ -679,9 +807,9 @@ namespace Gecode { namespace FlatZinc {
 
     /// Run the search
     void run(std::ostream& out, Printer &p,
-             const FlatZincOptions& opt, Gecode::Support::Timer& t_total);
+             const FlatZincOptionsStruct& opt, Gecode::Support::Timer& t_total);
 
-    void runPortfolio(std::ostream &out, Printer &p, const FlatZincOptions &opt, Support::Timer &t_total);
+    void runPortfolio(std::ostream &out, Printer &p, const FlatZincOptionsStruct &opt, Support::Timer &t_total);
 
     /// Produce output on \a out using \a p
     void print(std::ostream& out, const Printer& p) const;
@@ -731,7 +859,7 @@ namespace Gecode { namespace FlatZinc {
      *
      */
     void createBranchers(const Printer& p, AST::Node* ann,
-                         FlatZincOptions& opt, bool ignoreUnknown,
+                         FlatZincOptionsStruct& opt, bool ignoreUnknown,
                          std::ostream& err = std::cerr);
 
     /// Return the solve item annotations

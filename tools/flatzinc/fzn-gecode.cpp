@@ -65,7 +65,8 @@ int main(int argc, char** argv) {
     }
 
     if (fg) {
-      fg->createBranchers(p, fg->solveAnnotations(), opt,
+      FlatZinc::FlatZincOptionsStruct fzos(opt);
+      fg->createBranchers(p, fg->solveAnnotations(), fzos,
                           false, std::cerr);
       // move shrink arrays to fg->run to allow applying initial solutons
       // fg->shrinkArrays(p);
@@ -76,10 +77,10 @@ int main(int argc, char** argv) {
                     << std::endl;
           exit(EXIT_FAILURE);
         }
-        fg->run(os, p, opt, t_total);
+        fg->run(os, p, fzos, t_total);
         os.close();
       } else {
-        fg->run(std::cout, p, opt, t_total);
+        fg->run(std::cout, p, fzos, t_total);
       }
     } else {
       exit(EXIT_FAILURE);
