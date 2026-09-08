@@ -109,9 +109,7 @@ namespace Gecode { namespace Driver {
     }
     void update_time(double time) {
       delete ts;
-      if (time > 0.0) {
-        ts = new Search::TimeStop(time);
-      }
+      ts = time > 0.0 ? new Search::TimeStop(time) : nullptr;
     }
     /// Create appropriate stop-object
     static Search::Stop*

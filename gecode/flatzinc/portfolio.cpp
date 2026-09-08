@@ -728,11 +728,6 @@ void BanditArmAsset::updateBanditArm() {
 }
 
 bool BanditArmAsset::runNextRound() {
-    if (auto const* s = dynamic_cast<Driver::CombinedStop*>(_searchOptions->stop)) {
-        if (!s->done()) {
-            return false;
-        }
-    }
     return !_searchController._optimumFound->load() && _timeout.stop() < _flatZincOptions.time();
 }
 

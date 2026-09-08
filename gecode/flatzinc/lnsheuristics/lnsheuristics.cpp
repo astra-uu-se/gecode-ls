@@ -438,7 +438,7 @@ bool CostImpactGuided::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &
             freeze(incumbent, next, index);
       }
       // Only return false if variables were relaxed.
-      return numRelaxed > 0;
+      return false;
 }
 
 StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &space, const bool dependencyCuration, const std::vector<ConExpr*>& constraints) : GenericHeuristic(space, dependencyCuration), iv_size(space.iv.size()) {
