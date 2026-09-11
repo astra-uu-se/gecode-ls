@@ -83,14 +83,6 @@ namespace Gecode { namespace FlatZinc {
                     break;
                 }
             }
-            for (int i = 0; in_spaces && i < std::min(space->fv_lns.size(), desired->fv_lns.size()); ++i)
-            {
-                if (space->fv_lns[i].val() != desired->fv_lns[i].val())
-                {
-                    in_spaces = false;
-                    break;
-                }
-            }
         }
         if (in_spaces)
         {

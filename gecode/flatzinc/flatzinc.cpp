@@ -808,6 +808,8 @@ namespace Gecode { namespace FlatZinc {
     branchInfo = f.branchInfo;
     iv.update(*this, f.iv);
     iv_lns.update(*this, f.iv_lns);
+    bv_lns.update(*this, f.bv_lns);
+    iv_source.update(*this, f.iv_source);
     intVarCount = f.intVarCount;
 
     on_restart_iv.update(*this, f.on_restart_iv);
@@ -830,7 +832,7 @@ namespace Gecode { namespace FlatZinc {
     }
 
     bv.update(*this, f.bv);
-    bv_lns.update(*this, f.bv_lns);
+    bv_source.update(*this, f.bv_source);
     boolVarCount = f.boolVarCount;
     if (needAuxVars) {
       BoolVarArgs bva;
@@ -845,7 +847,6 @@ namespace Gecode { namespace FlatZinc {
 
 #ifdef GECODE_HAS_SET_VARS
     sv.update(*this, f.sv);
-    sv_lns.update(*this, f.sv_lns);
     setVarCount = f.setVarCount;
     if (needAuxVars) {
       SetVarArgs sva;
@@ -860,7 +861,6 @@ namespace Gecode { namespace FlatZinc {
 #endif
 #ifdef GECODE_HAS_FLOAT_VARS
     fv.update(*this, f.fv);
-    fv_lns.update(*this, f.fv_lns);
     floatVarCount = f.floatVarCount;
     if (needAuxVars) {
       FloatVarArgs fva;
@@ -1082,6 +1082,8 @@ namespace Gecode { namespace FlatZinc {
     if (ces.empty()) {
       return;
     }
+    populateSourceVars();
+    populateLnsVars();
     ConExprOrder ceo;
     std::sort(ces.begin(), ces.end(), ceo);
 
@@ -1140,17 +1142,6 @@ namespace Gecode { namespace FlatZinc {
     }
   }
 
-  void FlatZincSpace::shrinkLnsHeuristicArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new,
-    const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) {
-    for (int i = static_cast<int>(_lnsHeuristics.size()) - 1; i >= 0; --i) {
-      _lnsHeuristics.at(i)->shrinkArrays(iv_new, bv_new, fv_new, sv_new);
-      if (!_lnsHeuristics.at(i)->applicable()) {
-        std::swap(_lnsHeuristics.at(i), _lnsHeuristics.back());
-        _lnsHeuristics.pop_back();
-      }
-    }
-  }
-
   void FlatZincSpace::pruneLnsHeuristics(const bool onlyGenericHeuristics) {
     if (!onlyGenericHeuristics) {
       return;
@@ -1175,32 +1166,42 @@ namespace Gecode { namespace FlatZinc {
     _lnsHeuristics = cloned_heuristics;
   }
 
-  void FlatZincSpace::populateLnsVariables() {
-    if (iv_lns.size() == 0) {
+  void FlatZincSpace::populateSourceVars() {
+    if (iv_source.size() == 0) {
       int k = 0;
       for (int i = 0; i < iv.size(); ++i) {
         k += intIsFuncDep(i) ? 0 : 1;
       }
-      iv_lns = IntVarArray(*this, k);
+      iv_source = IntVarArray(*this, k);
       k = 0;
       for (int i = 0; i < iv.size(); ++i) {
         if (!intIsFuncDep(i)) {
-          iv_lns[k++] = iv[i];
+          iv_source[k++] = iv[i];
         }
       }
     }
-    if (bv_lns.size() == 0) {
+    if (bv_source.size() == 0) {
       int k = 0;
       for (int i = 0; i < bv.size(); ++i) {
         k += intIsFuncDep(i) ? 0 : 1;
       }
-      bv_lns = BoolVarArray(*this, k);
+      bv_source = BoolVarArray(*this, k);
       k = 0;
       for (int i = 0; i < bv.size(); ++i) {
         if (!boolIsFuncDep(i)) {
-          bv_lns[k++] = bv[i];
+          bv_source[k++] = bv[i];
         }
       }
+    }
+  }
+
+  void
+  FlatZincSpace::populateLnsVars() {
+    if (iv_lns.size() == 0) {
+      iv_lns = IntVarArray(*this, iv);
+    }
+    if (bv_lns.size() == 0) {
+      bv_lns = BoolVarArray(*this, bv);
     }
   }
 
@@ -1534,6 +1535,18 @@ namespace Gecode { namespace FlatZinc {
     if (opt.restart() == RM_NONE) {
       opt.restart(RM_CONSTANT);
       opt.restart_scale(500);
+    }
+    if (iv_lns.size() == 0 && iv.size() > 0) {
+      iv_lns = IntVarArray(*this, iv.size());
+      for (int i = 0; i < iv.size(); ++i) {
+        iv_lns[i] = iv[i];
+      }
+    }
+    if (bv_lns.size() == 0 && bv.size() > 0) {
+      bv_lns = BoolVarArray(*this, bv.size());
+      for (int i = 0; i < bv.size(); ++i) {
+        bv_lns[i] = bv[i];
+      }
     }
 
 
@@ -2408,10 +2421,8 @@ namespace Gecode { namespace FlatZinc {
     SearchController assetSearch(this, out, p, opt, t_total);
     // Populate the initial solution
     if (hasInitialIncumbentSolution(solveAnnotations())) {
-      auto* clone = deepClone();
-      clone->applyInitialIncumbentSolution(solveAnnotations());
-      const auto sol = std::shared_ptr<FlatZincSpace>(dynamic_cast<FlatZincSpace*>(clone->clone()));
-      delete clone;
+      auto sol = std::shared_ptr<FlatZincSpace>(deepClone());
+      sol->applyInitialIncumbentSolution(solveAnnotations());
       assetSearch.updateBestSolution(sol, std::numeric_limits<unsigned int>::max());
     }
     shrinkArrays(p);
@@ -2999,10 +3010,10 @@ namespace Gecode { namespace FlatZinc {
   std::vector<int>
   FlatZincSpace::arg2intindices(AST::Node* arg, int offset) const {
     AST::Array* a = arg->getArray();
-    if (a->a.size() == 0) {
+    if (a->a.empty()) {
       return std::vector<int>{};
     }
-    std::vector<int> indices(a->a.size()+offset);
+    std::vector<int> indices(a->a.size() + offset);
     for (int i=offset; i--;)
       indices[i] = -1;
     for (int i=a->a.size(); i--;) {
@@ -3015,35 +3026,77 @@ namespace Gecode { namespace FlatZinc {
     return indices;
   }
   bool
-  FlatZincSpace::sourcevars(AST::Node *arg) const {
-    if (arg->isIntVar()) {
-      return !iv[arg->getIntVar()].assigned() && !intIsFuncDep(arg->getIntVar());
-    }
-    if (arg->isBoolVar()) {
-      return !bv[arg->getBoolVar()].assigned() && !boolIsFuncDep(arg->getBoolVar());
-    }
-    if (!arg->isArray()) {
+  definesVar(ConExpr const* ce, AST::Node const* varNode) {
+    if (ce->ann == nullptr) {
       return false;
     }
-    bool containsVars = false;
-    AST::Array* a = arg->getArray();
-    if (a->a.size() == 0) {
-      return false;
-    }
-    for (unsigned int i=a->a.size(); i--;) {
-      if (a->a[i]->isBool() || a->a[i]->isInt()) {
+    for (auto * annotation : ce->ann->a) {
+      if (!annotation->isCall("defines_var")) {
         continue;
       }
-      if (a->a[i]->isIntVar()) {
-        if (!iv[a->a[i]->getIntVar()].assigned() && intIsFuncDep(a->a[i]->getIntVar())) {
+      const auto& call = annotation->getCall("defines_var");
+      if (varNode == call->args) {
+        return true;
+      }
+    }
+    return false;
+  }
+  bool
+  FlatZincSpace::sourcevars(ConExpr const* ce) const {
+    bool containsVars = false;
+    for (int i = 0; i < ce->size(); i++) {
+      AST::Node* arg = (*ce)[i];
+      if (arg->isIntVar()) {
+        if (iv[arg->getIntVar()].assigned() || definesVar(ce, arg)) {
+          continue;
+        }
+        if (intIsFuncDep(arg->getIntVar())) {
           return false;
         }
         containsVars = true;
-      } else if (a->a[i]->isBoolVar()) {
-        if (!bv[a->a[i]->getBoolVar()].assigned() && boolIsFuncDep(a->a[i]->getBoolVar())) {
+        continue;
+      }
+      if (arg->isBoolVar()) {
+        if (bv[arg->getBoolVar()].assigned() || definesVar(ce, arg)) {
+          continue;
+        }
+        if (boolIsFuncDep(arg->getBoolVar())) {
           return false;
         }
         containsVars = true;
+        continue;
+      }
+      if (!arg->isArray()) {
+        continue;
+      }
+      AST::Array const* a = arg->getArray();
+      if (a->a.empty()) {
+        continue;
+      }
+      for (unsigned int j=a->a.size(); j--;) {
+        if (a->a[j]->isBool() || a->a[j]->isInt()) {
+          continue;
+        }
+        if (a->a[j]->isIntVar()) {
+          if (iv[a->a[j]->getIntVar()].assigned() || definesVar(ce, a->a[j])) {
+            continue;
+          }
+          if (intIsFuncDep(a->a[j]->getIntVar())) {
+            return false;
+          }
+          containsVars = true;
+          continue;
+        }
+        if (a->a[j]->isBoolVar()) {
+          if (bv[a->a[j]->getBoolVar()].assigned() || definesVar(ce, a->a[j])) {
+            continue;
+          }
+          if (boolIsFuncDep(a->a[j]->getBoolVar())) {
+            return false;
+          }
+          containsVars = true;
+          continue;
+        }
       }
     }
     return containsVars;
@@ -3689,11 +3742,6 @@ namespace Gecode { namespace FlatZinc {
     fv = FloatVarArray(home, fva);
     fv_names = fv_names_new;
 #endif
-
-  auto* fzs = dynamic_cast<FlatZincSpace*>(&home);
-    if (fzs) {
-      fzs->shrinkLnsHeuristicArrays(iv_new, bv_new, fv_new, sv_new);
-    }
 
   }
 

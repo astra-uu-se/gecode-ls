@@ -50,6 +50,7 @@
 #endif
 #include <map>
 #include <optional>
+#include <variant>
 
 /*
  * Support for DLLs under Windows
@@ -641,10 +642,10 @@ namespace Gecode { namespace FlatZinc {
     Gecode::IntVarArray iv_lns;
     /// The Boolean variables used in LNS
     Gecode::BoolVarArray bv_lns;
-    /// The float variables used in LNS
-    Gecode::FloatVarArray fv_lns;
-    /// The set variables used in LNS
-    Gecode::SetVarArray sv_lns;
+    /// The integer source variables
+    Gecode::IntVarArray iv_source;
+    /// The Boolean source variables
+    Gecode::BoolVarArray bv_source;
 
     /// the LNS heuristic index to use for search (-1 for no heuristic)
     std::shared_ptr<int> heuristic{nullptr};
@@ -787,14 +788,14 @@ namespace Gecode { namespace FlatZinc {
     /// Post a constraint specified by \a ce
     void postConstraints(std::vector<ConExpr*>& ces);
 
-    void shrinkLnsHeuristicArrays(const std::map<int, int> & iv_new, const std::map<int, int> & bv_new, const std::map<int, int> & fv_new, const std::map<int, int> & sv_new);
-
     void pruneLnsHeuristics(bool onlyGenericHeuristics);
 
     void cloneLnsHeuristics();
 
     /// populate the source variables
-    void populateLnsVariables();
+    void populateSourceVars();
+
+    void populateLnsVars();
 
     unsigned int numLnsHeuristics() const;
 
@@ -904,7 +905,7 @@ namespace Gecode { namespace FlatZinc {
 
     std::vector<int> arg2intindices(AST::Node *arg, int offset = 0) const;
 
-    bool sourcevars(AST::Node *arg) const;
+    bool sourcevars(ConExpr const* ce) const;
 
     /// Convert \a arg to BoolVarArgs
     BoolVarArgs arg2boolvarargs(AST::Node* arg, int offset = 0, int siv=-1);
@@ -943,7 +944,6 @@ namespace Gecode { namespace FlatZinc {
     virtual ~LnsHeuristic() = default;
     [[nodiscard]] virtual std::shared_ptr<LnsHeuristic> clone() const = 0;
     [[nodiscard]] virtual bool requires_cloning() const { return false; };
-    virtual void shrinkArrays(const std::map<int,int>& iv_new, const std::map<int,int>& bv_new, const std::map<int,int>& fv_new, const std::map<int,int>& sv_new) = 0;
     virtual bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) = 0;
     [[nodiscard]] virtual bool applicable() const = 0;
   };

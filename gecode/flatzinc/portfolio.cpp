@@ -559,9 +559,6 @@ _curFlatZincSpace(curFlatZincSpace),
 _flatZincOptions(flatZincOptions),
 _assetType(assetType),
 _assetId(assetId) {
-    if (_curFlatZincSpace != nullptr) {
-        _curFlatZincSpace->populateLnsVariables();
-    }
 }
 
 std::shared_ptr<Search::Options> BaseAsset::generateSearchOptions(FlatZincSpace& originalFlatZincSpace, Search::Stop* stop) const {

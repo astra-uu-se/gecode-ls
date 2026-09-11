@@ -488,7 +488,7 @@ private:
     int _banditArm;
     std::shared_ptr<int> heuristic;
 
-    const double defaultTime{5000};
+    const double defaultTime{3000};
     std::optional<double> time;
     size_t _banditTimestamp{std::numeric_limits<size_t>::max()};
     size_t _numCurSolutions{0};

@@ -55,34 +55,27 @@ namespace Gecode { namespace FlatZinc {
 
 void freezeBool(const FlatZincSpace& incumbent, FlatZincSpace& next, const int index) {
     rel(next,
-      next.bv[index],
+      next.bv_lns[index],
       IRT_EQ,
-      incumbent.bv[index].val());
+      incumbent.bv_lns[index].val());
 }
 
 void freezeInt(const FlatZincSpace& incumbent, FlatZincSpace& next, const int index) {
     rel(next,
-      next.iv[index],
+      next.iv_lns[index],
       IRT_EQ,
-      incumbent.iv[index].val());
-}
-
-unsigned int GenericHeuristic::numVars() const {
-    return vars.size();
+      incumbent.iv_lns[index].val());
 }
 
 unsigned int GenericHeuristic::numVars(const FlatZincSpace &space) const {
-    if (vars.empty()) {
-        return space.iv.size() + space.bv.size();
-    }
-    return vars.size();
+    return _dependencyCuration ? space.iv_source.size() + space.bv_source.size() :space.iv_lns.size() + space.bv_lns.size();
 }
 
 unsigned int GenericHeuristic::domainSize(const FlatZincSpace& next, const int index) const {
     if (isBoolVar(next, index)) {
-        return next.bv[varIndex(next, index)].size();
+        return next.bv_lns[varIndex(next, index)].size();
     }
-    return next.iv[varIndex(next, index)].size();
+    return next.iv_lns[varIndex(next, index)].size();
 }
 
 void GenericHeuristic::freeze(const FlatZincSpace& incumbent, FlatZincSpace& next, const int index) const {
@@ -99,7 +92,7 @@ int randInInterval(const int lowInc, const int upExc, Rnd& random) {
 int lexBound(const FlatZincSpace& s) {
     assert(s.optVar() >= 0);
     assert(s.optVarIsInt());
-    return s.method() == FlatZincSpace::MAX ? s.iv[s.optVar()].min() : -s.iv[s.optVar()].max();
+    return s.method() == FlatZincSpace::MAX ? s.iv_lns[s.optVar()].min() : -s.iv_lns[s.optVar()].max();
 }
 
 std::vector<int> GenericHeuristic::createIndices(const FlatZincSpace &next) const {
@@ -109,90 +102,45 @@ std::vector<int> GenericHeuristic::createIndices(const FlatZincSpace &next) cons
 }
 
 bool GenericHeuristic::isIntVar(const FlatZincSpace &next, const int index) const {
-    return vars.empty() ? (0 <= index && index < next.iv.size()) : vars.at(index).first == VAR_INT;
+    return _dependencyCuration ? (0 <= index && index < next.iv_source.size()) : (0 <= index && index < next.iv_lns.size());
 }
 
 bool GenericHeuristic::isBoolVar(const FlatZincSpace& next, const int index) const {
-    return vars.empty() ? (0 <= index - next.iv.size() && index - next.iv.size() < next.bv.size()) : vars.at(index).first == VAR_BOOL;
+    return _dependencyCuration ? (0 <= index - next.iv_source.size() && index - next.iv_source.size() < next.bv_source.size()) : (next.iv_lns.size() <= index && index - next.iv_lns.size() < next.bv_lns.size());
 }
 
 int GenericHeuristic::varIndex(const FlatZincSpace &next, const int index) const {
-    if (vars.empty()) {
-        return isIntVar(next, index) ? index : (index - next.iv.size());
+    if (_dependencyCuration) {
+        return isIntVar(next, index) ? index : index - next.iv_source.size();
     }
-    return vars[index].second;
+    return isIntVar(next, index) ? index : index - next.iv_lns.size();
 }
 
 bool GenericHeuristic::isAssigned(const FlatZincSpace &next, const int index) const {
-    if (isBoolVar(next, index)) {
-        return next.bv[varIndex(next, index)].assigned();
+    if (_dependencyCuration) {
+        return isIntVar(next, index) ? next.iv_source[varIndex(next, index)].assigned() : next.bv_source[varIndex(next, index)].assigned();
     }
-    return next.iv[varIndex(next, index)].assigned();
+    return isIntVar(next, index) ? next.iv_lns[varIndex(next, index)].assigned() : next.bv_lns[varIndex(next, index)].assigned();
 }
 
-GenericHeuristic::GenericHeuristic(const FlatZincSpace& space, const bool dependencyCuration) : depCur(dependencyCuration) {
-    const unsigned int num_vars = space.iv.size() + space.bv.size() - (space.optVarIsInt() && space.optVar() > 0 ? 1 : 0);
+GenericHeuristic::GenericHeuristic(const FlatZincSpace& space, const bool dependencyCuration) : _dependencyCuration(dependencyCuration) {
     if (dependencyCuration) {
-        const unsigned int num_lns = space.iv_lns.size() + space.bv_lns.size();
-        if (num_vars == num_lns) {
-            vars.clear();
+        const unsigned int num_vars = space.iv_lns.size() + space.bv_lns.size() - (space.optVarIsInt() && space.optVar() > 0 ? 1 : 0);
+        const unsigned int num_source = space.iv_source.size() + space.bv_source.size();
+        if (num_vars == num_source) {
+            _applicable = false;
             return;
         }
-        vars.reserve(num_lns);
-    } else {
-        vars.clear();
-        return;
     }
-    for (int i = 0; i < space.iv.size(); ++i) {
-        if ((!space.optVarIsInt() || space.optVar() != i) && !space.intIsFuncDep(i) && !space.iv[i].assigned()) {
-            vars.emplace_back(VAR_INT, i);
-        }
-    }
-    for (int i = 0; i < space.bv.size(); ++i) {
-        if (!space.boolIsFuncDep(i) && !space.bv[i].assigned()) {
-            vars.emplace_back(VAR_BOOL, i);
-        }
-    }
+    _applicable = true;
 }
 
-void GenericHeuristic::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new,
-    const std::map<int, int>&, const std::map<int, int>&) {
-    if (vars.empty()) {
-        return;
-    }
-    std::vector<bool> iv_seen(iv_new.size(), false);
-    std::vector<bool> bv_seen(iv_new.size(), false);
-    for (int i = static_cast<int>(vars.size()) - 1; i >= 0; --i) {
-        if (vars[i].first == VAR_INT) {
-            const auto iter = iv_new.find(vars[i].second);
-            if (iter == iv_new.end()) {
-                std::swap(vars[i], vars.back());
-                vars.pop_back();
-            } else if (!iv_seen[iter->second]) {
-                iv_seen[iter->second] = true;
-                vars[i].second = iter->second;
-            }
-        } else if (vars[i].first == VAR_BOOL) {
-            const auto iter = bv_new.find(vars[i].second);
-            if (iter == bv_new.end()) {
-                std::swap(vars[i], vars.back());
-                vars.pop_back();
-            } else if (!bv_seen[iter->second]) {
-                bv_seen[iter->second] = true;
-                vars[i].second = iter->second;
-            }
-        }
-    }
-    std::sort(vars.begin(), vars.end(), [&](const std::pair<VAR_TYPE, int>& p1, const std::pair<VAR_TYPE, int>& p2) {
-        if (p1.first != p2.first) {
-            return static_cast<int>(p1.first) < static_cast<int>(p2.first);
-        }
-        return p1.second < p2.second;
-    });
+bool GenericHeuristic::dependencyCuration() const {
+    return _dependencyCuration;
 }
 
 bool GenericHeuristic::applicable() const {
-    return !depCur || !vars.empty();
+    return _applicable;
 }
 
 NaiveRandom::NaiveRandom(const FlatZincSpace &space, const bool dependencyCuration) : GenericHeuristic(space, dependencyCuration) {}
@@ -441,15 +389,33 @@ bool CostImpactGuided::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &
       return false;
 }
 
-StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &space, const bool dependencyCuration, const std::vector<ConExpr*>& constraints) : GenericHeuristic(space, dependencyCuration), iv_size(space.iv.size()) {
+StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &space, const bool dependencyCuration, const std::vector<ConExpr*>& constraints) :
+    GenericHeuristic(space, dependencyCuration) {
     constexpr size_t num_types = 2;
     // For var[i] = <t, j>, create var_indices[t][j] = i
-    std::array<std::unordered_map<int,int>,num_types> var_indices;
-    for (int index = 0; index < numVars(space); ++index) {
-        if (GenericHeuristic::isIntVar(space, index)) {
-            var_indices[0].emplace(GenericHeuristic::varIndex(space, index), index);
-        } else {
-            var_indices[1].emplace(GenericHeuristic::varIndex(space, index), index);
+    std::array<std::unordered_map<int,int>,num_types> inverse_index;
+    if (dependencyCuration) {
+        var_indices.reserve(space.iv_source.size() + space.bv_source.size());
+        for (auto j = 0; j < space.iv_lns.size(); ++j) {
+            if ((!space.optVarIsInt() || space.optVar() != j) && !space.intIsFuncDep(j)) {
+                inverse_index[0].emplace(j, var_indices.size());
+                var_indices.emplace_back(j);
+            }
+        }
+        for (auto j = 0; j < space.bv_lns.size(); ++j) {
+            if (!space.boolIsFuncDep(j)) {
+                inverse_index[1].emplace(j, var_indices.size());
+                var_indices.emplace_back(j);
+            }
+        }
+    } else {
+        var_indices.resize(space.iv_lns.size() + space.bv_lns.size());
+        std::iota(var_indices.begin(), var_indices.end(), 0);
+        for (auto j = 0; j < space.iv_lns.size(); ++j) {
+            inverse_index[0].emplace(j, j);
+        }
+        for (auto j = 0; j < space.bv_lns.size(); ++j) {
+            inverse_index[1].emplace(j, space.iv_lns.size() + j);
         }
     }
 
@@ -457,14 +423,14 @@ StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &
     auto addConstraintInput = [&](AST::Node *node) {
         if (node->isIntVar()) {
             const int var_index = node->getIntVar();
-            const auto iter = var_indices[0].find(var_index);
-            if (!space.iv[var_index].assigned() && iter != var_indices[1].end()) {
+            const auto iter = inverse_index[0].find(var_index);
+            if (!space.iv_lns[var_index].assigned() && iter != inverse_index[1].end()) {
                 constraint_arguments.back().emplace_back(iter->second);
             }
         } else if (node->isBoolVar()) {
             const int var_index = node->getBoolVar();
-            const auto iter = var_indices[1].find(var_index);
-            if (!space.bv[var_index].assigned() && iter != var_indices[0].end()) {
+            const auto iter = inverse_index[1].find(var_index);
+            if (!space.bv_lns[var_index].assigned() && iter != inverse_index[0].end()) {
                 constraint_arguments.back().emplace_back(iter->second);
             }
         }
@@ -474,13 +440,13 @@ StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &
     for (const ConExpr* ce : constraints) {
         constraint_arguments.emplace_back();
         for (size_t i = 0; i < ce->args->a.size(); ++i) {
-            if (ce->args->a[0]->isArray()) {
-                auto arr = ce->args->a[0]->getArray();
+            if (ce->args->a[i]->isArray()) {
+                auto arr = ce->args->a[i]->getArray();
                 for (const auto & node : arr->a) {
                     addConstraintInput(node);
                 }
             } else {
-                addConstraintInput(ce->args->a[0]);
+                addConstraintInput(ce->args->a[i]);
             }
         }
         if (constraint_arguments.back().empty()) {
@@ -490,64 +456,7 @@ StaticVariableRelationGuided::StaticVariableRelationGuided(const FlatZincSpace &
             constraint_arguments.back().erase(std::unique(constraint_arguments.back().begin(), constraint_arguments.back().end()), constraint_arguments.back().end());
         }
     }
-    compute_variable_relations(numVars(space));
-}
-
-void StaticVariableRelationGuided::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new,
-    const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) {
-
-    // member constraint_arguments must be updated before calling GenericHeuristic::shrinkArrays
-    for (int i = static_cast<int>(constraint_arguments.size()) - 1; i >= 0; --i) {
-        for (int j = static_cast<int>(constraint_arguments[i].size()) - 1; j >= 0; --j) {
-            if (isIntVar(constraint_arguments[i][j])) {
-                const auto iter = iv_new.find(varIndex(constraint_arguments[i][j]));
-                if (iter == iv_new.end()) {
-                    std::swap(constraint_arguments[i][j], constraint_arguments[i].back());
-                    constraint_arguments[i].pop_back();
-                } else {
-                    constraint_arguments[i][j] = iter->second;
-                }
-            } else {
-                const auto iter = bv_new.find(varIndex(constraint_arguments[i][j]));
-                if (iter == bv_new.end()) {
-                    std::swap(constraint_arguments[i][j], constraint_arguments[i].back());
-                    constraint_arguments[i].pop_back();
-                } else {
-                    constraint_arguments[i][j] = iter->second + static_cast<int>(iv_new.size());
-                }
-            }
-        }
-        if (constraint_arguments[i].empty()) {
-            std::swap(constraint_arguments[i], constraint_arguments.back());
-            constraint_arguments.pop_back();
-        } else {
-            std::sort(constraint_arguments[i].begin(), constraint_arguments[i].end());
-            constraint_arguments[i].erase(std::unique(constraint_arguments[i].begin(), constraint_arguments[i].end()), constraint_arguments[i].end());
-        }
-    }
-
-    GenericHeuristic::shrinkArrays(iv_new, bv_new, fv_new, sv_new);
-    // toIndex[t][i] = index of <t, i> in member vars for variable with type t
-    std::array<std::vector<int>,2> toIndex{std::vector<int>(iv_new.size()),std::vector<int>(bv_new.size())};
-    iv_size = static_cast<int>(iv_new.size());
-    const int n = vars.empty() ? static_cast<int>((iv_new.size() + bv_new.size())) : static_cast<int>(vars.size());
-    for (int i = 0; i < n; ++i) {
-        if (isIntVar(i)) {
-            toIndex[0][varIndex(i)] = i;
-        } else {
-            toIndex[1][varIndex(i)] = i;
-        }
-    }
-    for (auto& arguments : constraint_arguments) {
-        for (auto& index : arguments) {
-            if (index < iv_new.size()) {
-                index = toIndex[0][index];
-            } else {
-                index = toIndex[1][index];
-            }
-        }
-    }
-    compute_variable_relations(bv_new.size() + iv_new.size());
+    compute_variable_relations();
 }
 
 bool StaticVariableRelationGuided::requires_cloning() const {
@@ -558,31 +467,10 @@ std::shared_ptr<LnsHeuristic> StaticVariableRelationGuided::clone() const {
     return std::make_shared<StaticVariableRelationGuided>(*this);
 }
 
-bool StaticVariableRelationGuided::isIntVar(const int index) const {
-    if (vars.empty()) {
-        return index < iv_size;
-    }
-    return vars.at(index).first == VAR_INT;
-}
-
-bool StaticVariableRelationGuided::isBoolVar(const int index) const {
-    if (vars.empty()) {
-        return index > iv_size;
-    }
-    return vars.at(index).first == VAR_BOOL;
-}
-
-int StaticVariableRelationGuided::varIndex(const int index) const {
-    if (vars.empty()) {
-        return index < iv_size ? index : (index - iv_size);
-    }
-    return vars.at(index).second;
-}
-
-void StaticVariableRelationGuided::compute_variable_relations(const unsigned int numVars) {
+void StaticVariableRelationGuided::compute_variable_relations() {
     // variable_relations[i][j] = the relation between variables vars[i] and vars[j]
     variable_relations.clear();
-    variable_relations.resize(numVars, std::vector<double>(numVars, 0.0));
+    variable_relations.resize(var_indices.size(), std::vector<double>(var_indices.size(), 0.0));
 
     // The variable_relations matrix is used for Static Variable Dependency LNS asset
     // and contain the relations between the variables given the weights defined for each constraint.
@@ -596,7 +484,7 @@ void StaticVariableRelationGuided::compute_variable_relations(const unsigned int
     }
 
     // num_constraints[i] = number of non-unary constraints vars[i] occurs in:
-    std::vector<int> num_constraints(numVars, 0);
+    std::vector<int> num_constraints(var_indices.size(), 0);
     for (const auto & arguments : constraint_arguments) {
         if (arguments.size() <= 1) {
             continue;
@@ -650,48 +538,59 @@ int StaticVariableRelationGuided::selectRandomRelatedIndex(FlatZincSpace& next, 
     return best_indices_index;
 }
 
-bool StaticVariableRelationGuided::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) {
-    std::vector<int> indices = createIndices(next);
-
-  if (foundNewSolution || variable_impacts.size() < indices.size()) {
-
-    variable_impacts.resize(indices.size());
-
-    const int oldBound = lexBound(incumbent);
-    for (int i = 0; i < indices.size(); ++i) {
-      auto* fzs_clone = dynamic_cast<FlatZincSpace*>(next.clone());
-
-      freeze(incumbent, *fzs_clone, i);
-      fzs_clone->status();
-
-      const int newBound = lexBound(*fzs_clone);
-      const int impact = std::abs(newBound - oldBound);
-      variable_impacts.at(i) = impact;
-      delete fzs_clone;
+void StaticVariableRelationGuided::freeze(const FlatZincSpace &incumbent, FlatZincSpace &next, const int index) const {
+    if (index < next.iv_lns.size()) {
+        rel(next, next.iv_lns[var_indices[index]], IRT_EQ, incumbent.iv_lns[var_indices[index]]);
+    } else {
+        rel(next, next.bv_lns[var_indices[index]], IRT_EQ, incumbent.bv_lns[var_indices[index]]);
     }
-  }
+}
 
-  const double relaxFactor = static_cast<double>(100 - next.freezePercent()) / 100.0;
-  const size_t numVarsToRelax = std::max<size_t>(1, static_cast<size_t>(ceil(relaxFactor * static_cast<double>(indices.size()))));
-  const int n = 10 - static_cast<int>(round(5.0 * relaxFactor));
+bool StaticVariableRelationGuided::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) {
 
-  int best_var_index = -1;
-  for (int i = 0; i < numVarsToRelax && !indices.empty(); ++i) {
-    // Select variable to relax:
-    const int best_indices_index = i % 2 == 0
-                             ? selectRandomBestIndex(next, indices, n)
-                             : selectRandomRelatedIndex(next, indices, best_var_index, n);
-    best_var_index = indices[best_indices_index];
-    // remove best_index from indices
-    indices[best_indices_index] = indices.back();
-    indices.pop_back();
-  }
-  // freeze all non-relaxed variables:
-  for (const int index : indices) {
-    freeze(incumbent, next, index);
-  }
 
-  return false;
+    if (foundNewSolution || variable_impacts.size() < var_indices.size()) {
+        variable_impacts.resize(var_indices.size());
+
+        const int oldBound = lexBound(incumbent);
+        for (int i = 0; i < var_indices.size(); ++i) {
+            auto* fzs_clone = dynamic_cast<FlatZincSpace*>(next.clone());
+
+
+            freeze(incumbent, *fzs_clone, i);
+            fzs_clone->status();
+
+            const int newBound = lexBound(*fzs_clone);
+            const int impact = std::abs(newBound - oldBound);
+            variable_impacts.at(i) = impact;
+            delete fzs_clone;
+        }
+    }
+
+
+    const double relaxFactor = static_cast<double>(100 - next.freezePercent()) / 100.0;
+    const size_t numVarsToRelax = std::max<size_t>(1, static_cast<size_t>(ceil(relaxFactor * static_cast<double>(var_indices.size()))));
+    const int n = 10 - static_cast<int>(round(5.0 * relaxFactor));
+
+    std::vector<int> indices(var_indices.size(), 0);
+    std::iota(indices.begin(), indices.end(), 0);
+    int best_var_index = -1;
+    for (int i = 0; i < numVarsToRelax && !indices.empty(); ++i) {
+        // Select variable to relax:
+        const int best_indices_index = i % 2 == 0
+                                 ? selectRandomBestIndex(next, indices, n)
+                                 : selectRandomRelatedIndex(next, indices, best_var_index, n);
+        best_var_index = indices[best_indices_index];
+        // remove best_index from indices
+        indices[best_indices_index] = indices.back();
+        indices.pop_back();
+    }
+    // freeze all non-relaxed variables:
+    for (const int index : indices) {
+        freeze(incumbent, next, index);
+    }
+
+    return false;
 }
 
 ObjectiveRelaxationGuided::ObjectiveRelaxationGuided(const FlatZincSpace &space, const std::vector<ConExpr *> &constraints) : indices(nullptr) {
@@ -745,7 +644,7 @@ ObjectiveRelaxationGuided::ObjectiveRelaxationGuided(const FlatZincSpace &space,
         indices = std::make_shared<std::vector<int>>();
         indices->reserve(vars->a.size() - 1);
         for (size_t i = 0; i < vars->a.size(); i++) {
-            if (vars->a[i]->getIntVar() != space.optVar() && vars->a[i]->isIntVar() && !space.iv[vars->a[i]->getIntVar()].assigned() && (stddev < 1 || coef->a[i]->getInt() < mean)) {
+            if (vars->a[i]->getIntVar() != space.optVar() && vars->a[i]->isIntVar() && !space.iv_lns[vars->a[i]->getIntVar()].assigned() && (stddev < 1 || coef->a[i]->getInt() < mean)) {
                 indices->emplace_back(vars->a[i]->getIntVar());
             }
         }
@@ -766,35 +665,12 @@ bool ObjectiveRelaxationGuided::heuristic(const FlatZincSpace &incumbent, FlatZi
     return false;
 }
 
-void ObjectiveRelaxationGuided::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &,
-                                             const std::map<int, int> &, const std::map<int, int> &) {
-    if (indices == nullptr || indices->empty()) {
-        return;
-    }
-    for (int i = static_cast<int>(indices->size()-1); i >= 0; i--) {
-        const auto iter = iv_new.find((*indices)[i]);
-        if (iter != iv_new.end()) {
-            (*indices)[i] = iter->second;
-        } else {
-            std::swap((*indices)[i], indices->back());
-            indices->pop_back();
-        }
-    }
-}
-
 bool ObjectiveRelaxationGuided::applicable() const {
     return indices != nullptr && !indices->empty();
 }
 
 LnsHeuristicCombinator::LnsHeuristicCombinator(std::vector<std::shared_ptr<LnsHeuristic>>&& n)
     : neighborhoods(std::move(n)) {}
-
-void LnsHeuristicCombinator::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new,
-    const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) {
-    for (auto& n : neighborhoods) {
-        n->shrinkArrays(iv_new, bv_new, fv_new, sv_new);
-    }
-}
 
 bool LnsHeuristicCombinator::requires_cloning() const {
     return std::any_of(neighborhoods.begin(), neighborhoods.end(), [&](const std::shared_ptr<LnsHeuristic>& neighbor) {
@@ -828,37 +704,33 @@ bool LnsHeuristicCombinator::applicable() const {
 
 Circuit::Circuit(const int o, std::vector<int>&& v) :
     offset(o),
-    vars(std::move(v)){}
-
-void Circuit::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &,
-    const std::map<int, int> &, const std::map<int, int> &) {
-    for (int i = 0; i < vars.size(); ++i) {
-        assert(iv_new.find(vars[i]) != iv_new.end());
-        vars[i] = iv_new.find(vars[i])->second;
-    }
-}
+    source_vars(std::move(v)){}
 
 std::shared_ptr<LnsHeuristic> Circuit::clone() const {
     return std::make_shared<Circuit>(*this);
 }
 
 bool Circuit::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) {
-    const int average  = static_cast<int>(static_cast<double>(vars.size() * next.freezePercent()) / 100.0);
+    const int average  = static_cast<int>(static_cast<double>(source_vars.size() * next.freezePercent()) / 100.0);
     std::poisson_distribution<int> distribution(average);
 
     std::mt19937 gen(next.random(std::numeric_limits<int>::max()));
-    const int numThawed = std::clamp<int>(distribution(gen), 2, static_cast<int>(vars.size()));
-    const int startIndex = next.random(static_cast<int>(vars.size()) - numThawed);
+    const int numThawed = std::clamp<int>(distribution(gen), 2, static_cast<int>(source_vars.size()));
+    const int startIndex = next.random(static_cast<int>(source_vars.size()) - numThawed);
     int remaining = 0;
 
     int index = 0;
-    for (int iterations = 0; iterations < vars.size(); ++iterations) {
+    for (int iterations = 0; iterations < source_vars.size(); ++iterations) {
+        assert(index >= 0);
+        assert(index < source_vars.size());
         if (index == startIndex) {
             remaining = numThawed;
         }
-        const int successorVal = incumbent.iv[vars[index]].val();
+        const int successorVal = incumbent.iv_source[source_vars[index]].val();
+        assert(successorVal >= offset);
+        assert(successorVal - offset < source_vars.size());
         if (remaining <= 0) {
-            rel(next, next.iv[vars[index]], IRT_EQ, successorVal);
+            rel(next, next.iv_source[source_vars[index]], IRT_EQ, successorVal);
         } else {
             --remaining;
         }
@@ -872,60 +744,51 @@ bool Circuit::applicable() const {
 }
 
 ScheduleUnary::ScheduleUnary(std::vector<int>&& tasks, std::vector<int>&& durs) :
-    vars(std::move(tasks)),
+    source_vars(std::move(tasks)),
     durations(std::move(durs)) {}
-
-void ScheduleUnary::shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &,
-    const std::map<int, int> &, const std::map<int, int> &) {
-    for (int i = 0; i < vars.size(); ++i) {
-        assert(iv_new.find(vars[i]) != iv_new.end());
-        assert(iv_new.find(vars[i])->first == vars[i]);
-        vars[i] = iv_new.find(vars[i])->second;
-    }
-}
 
 std::shared_ptr<LnsHeuristic> ScheduleUnary::clone() const {
     return std::make_shared<ScheduleUnary>(*this);
 }
 
 bool ScheduleUnary::heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) {
-    const int average  = static_cast<int>(static_cast<double>(vars.size() * next.freezePercent()) / 100.0);
+    const int average  = static_cast<int>(static_cast<double>(source_vars.size() * next.freezePercent()) / 100.0);
     std::poisson_distribution<int> distribution(average);
 
-    std::vector<int> chronological(vars.size());
+    std::vector<int> chronological(source_vars.size());
     std::iota(chronological.begin(), chronological.end(), 0);
 
     std::sort(chronological.begin(), chronological.end(), [&](const int i, const int j) {
-        return incumbent.iv[vars[i]].val() < incumbent.iv[vars[j]].val();
+        return incumbent.iv_source[source_vars[i]].val() < incumbent.iv_source[source_vars[j]].val();
     });
 
     std::mt19937 gen(next.random(std::numeric_limits<int>::max()));
-    const int numThawed = std::clamp<int>(distribution(gen), 2, static_cast<int>(vars.size()));
-    const int begin = next.random(static_cast<int>(vars.size()) - numThawed);
+    const int numThawed = std::clamp<int>(distribution(gen), 2, static_cast<int>(source_vars.size()));
+    const int begin = next.random(static_cast<int>(source_vars.size()) - numThawed);
     const int end = begin + numThawed;
 
     // Fix chronological order for tasks 0..begin
     for (int i = 0; i + 1 < begin; ++i) {
-        const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
-        rel(next, endTime, IRT_LQ, next.iv[vars[chronological[i + 1]]]);
+        const IntVar endTime = expr(next, next.iv_source[source_vars[chronological[i]]] + durations[chronological[i]]);
+        rel(next, endTime, IRT_LQ, next.iv_source[source_vars[chronological[i + 1]]]);
     }
     // Fix chronological order for tasks end..vars.size()
-    for (int i = end; i + 1 < vars.size(); ++i) {
-        const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
-        rel(next, endTime, IRT_LQ, next.iv[vars[chronological[i + 1]]]);
+    for (int i = end; i + 1 < source_vars.size(); ++i) {
+        const IntVar endTime = expr(next, next.iv_source[source_vars[chronological[i]]] + durations[chronological[i]]);
+        rel(next, endTime, IRT_LQ, next.iv_source[source_vars[chronological[i + 1]]]);
     }
     // Tasks in begin..end must start after chronological task begin-1 ends:
     if (begin > 0 && begin + 1 < end) {
-        const IntVar preEndTime = expr(next, next.iv[vars[chronological[begin - 1]]] + durations[chronological[begin - 1]]);
+        const IntVar preEndTime = expr(next, next.iv_source[source_vars[chronological[begin - 1]]] + durations[chronological[begin - 1]]);
         for (int i = begin; i < end; ++i) {
-            rel(next, preEndTime, IRT_LQ, next.iv[vars[chronological[i]]]);
+            rel(next, preEndTime, IRT_LQ, next.iv_source[source_vars[chronological[i]]]);
         }
     }
     // Tasks in begin..end must end before chronological task end ends:
-    if (end < vars.size()) {
+    if (end < source_vars.size()) {
         for (int i = begin; i < end; ++i) {
-            const IntVar endTime = expr(next, next.iv[vars[chronological[i]]] + durations[chronological[i]]);
-            rel(next, endTime, IRT_LQ, next.iv[vars[chronological[end]]]);
+            const IntVar endTime = expr(next, next.iv_source[source_vars[chronological[i]]] + durations[chronological[i]]);
+            rel(next, endTime, IRT_LQ, next.iv_source[source_vars[chronological[end]]]);
         }
     }
 

@@ -67,7 +67,7 @@ bool intersects(const std::set<AST::Node*>& a, const std::set<AST::Node*>& b) {
 void
 DependencyGraph::post(const FlatZincSpace& s, ConExpr const* ce) {
   for (unsigned i = 0; i < ce->size(); i++) {
-    if (!s.sourcevars((*ce)[0])) {
+    if (!s.sourcevars(ce)) {
       return;
     }
   }

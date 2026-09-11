@@ -47,10 +47,10 @@ namespace Gecode { namespace FlatZinc {
 };
 
   class GECODE_FLATZINC_EXPORT GenericHeuristic : public LnsHeuristic {
-    bool depCur;
+    bool _dependencyCuration;
+    bool _applicable;
+
   protected:
-    std::vector<std::pair<VAR_TYPE, int>> vars;
-    [[nodiscard]] unsigned int numVars() const;
     [[nodiscard]] unsigned int numVars(const FlatZincSpace& space) const;
     [[nodiscard]] unsigned int domainSize(const FlatZincSpace &next, int index) const;
     [[nodiscard]] std::vector<int> createIndices(const FlatZincSpace &next) const;
@@ -61,7 +61,7 @@ namespace Gecode { namespace FlatZinc {
     void freeze(const FlatZincSpace& incumbent, FlatZincSpace &next, int index) const;
   public:
     GenericHeuristic(const FlatZincSpace& space, bool dependencyCuration);
-    void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
+    [[nodiscard]] bool dependencyCuration() const;
     [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override = 0;
     bool heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) override = 0;
     [[nodiscard]] bool applicable() const override;
@@ -109,23 +109,20 @@ namespace Gecode { namespace FlatZinc {
   };
 
   class GECODE_FLATZINC_EXPORT StaticVariableRelationGuided : public GenericHeuristic {
-    int iv_size;
+    std::vector<int> var_indices;
     std::vector<std::vector<int>> constraint_arguments;
     std::vector<std::vector<double>> variable_relations;
     std::vector<int> variable_impacts;
-    bool isIntVar(int index) const;
-    bool isBoolVar(int index) const;
-    int varIndex(int index) const;
-    void compute_variable_relations(unsigned int numVars);
+    void compute_variable_relations();
     int selectRandomBestIndex(FlatZincSpace &next, std::vector<int> &indices, int n) const;
 
     int selectRandomRelatedIndex(FlatZincSpace &next, std::vector<int> &indices,
                                  unsigned int best_var_index, int n) const;
+    void freeze(const FlatZincSpace& incumbent, FlatZincSpace& next, int index) const;
 
   public:
     StaticVariableRelationGuided(const FlatZincSpace &space, bool dependencyCuration,
                                  const std::vector<ConExpr*> &constraints);
-    void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
     [[nodiscard]] bool requires_cloning() const override;
     [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override;
     bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) override;
@@ -136,7 +133,6 @@ namespace Gecode { namespace FlatZinc {
   public:
     ObjectiveRelaxationGuided(const FlatZincSpace &space, const std::vector<ConExpr*> &constraints);
     [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override;
-    void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
     bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) override;
     [[nodiscard]] bool applicable() const override;
   };
@@ -145,7 +141,6 @@ namespace Gecode { namespace FlatZinc {
     std::vector<std::shared_ptr<LnsHeuristic>> neighborhoods;
   public:
     explicit LnsHeuristicCombinator(std::vector<std::shared_ptr<LnsHeuristic>>&&);
-    void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
     [[nodiscard]] bool requires_cloning() const override;
     [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override;
     bool heuristic(const FlatZincSpace &incumbent, FlatZincSpace &next, const MetaInfo &mi, bool foundNewSolution) override;
@@ -154,21 +149,19 @@ namespace Gecode { namespace FlatZinc {
 
   class GECODE_FLATZINC_EXPORT Circuit : public LnsHeuristic {
       int offset;
-      std::vector<int> vars;
+      std::vector<int> source_vars;
     public:
       Circuit(int o, std::vector<int>&& v);
-      void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
       [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override;
       bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) override;
       [[nodiscard]] bool applicable() const override;
   };
 
   class GECODE_FLATZINC_EXPORT ScheduleUnary : public LnsHeuristic {
-    std::vector<int> vars;
+    std::vector<int> source_vars;
     std::vector<int> durations;
   public:
     ScheduleUnary(std::vector<int>&& tasks, std::vector<int>&& durs);
-    void shrinkArrays(const std::map<int, int> &iv_new, const std::map<int, int> &bv_new, const std::map<int, int> &fv_new, const std::map<int, int> &sv_new) override;
     [[nodiscard]] std::shared_ptr<LnsHeuristic> clone() const override;
     bool heuristic(const FlatZincSpace& incumbent, FlatZincSpace& next, const MetaInfo &mi, bool foundNewSolution) override;
     [[nodiscard]] bool applicable() const override;
