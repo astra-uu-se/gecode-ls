@@ -268,8 +268,10 @@ void SearchController::createAssets(double initTime) {
         }
     }
     for (int i = 0; i < numLnsAssets; ++i) {
-        if (_flatZincOptions.mab()) {
+        if (_flatZincOptions.mab() && !_flatZincOptions.only_bespoke()) {
             createBanditArmAsset(assetId);
+        } else if (_flatZincOptions.only_bespoke()) {
+            createLnsAsset(assetId, static_cast<int>(_flatZincSpace->numLnsHeuristics()) - 1);
         } else {
             createLnsAsset(assetId, i);
         }
@@ -660,6 +662,8 @@ executor(new AssetExecutor(searchController, this, fopt, assetId, true)) {
             searchController._optimumFound));
 
     _curFlatZincSpace->cloneLnsHeuristics();
+
+    _curFlatZincSpace->heuristic = std::make_shared<int>(_lnsNeighborhoodIndex);
 
     _engine = new RBSEngine(_curFlatZincSpace, *_searchOptions, searchController._optimumFound, searchController._allBestSolutions);
 }
